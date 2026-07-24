@@ -159,31 +159,31 @@ func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
 	}
 }
 
-// TestPlatformHomeEndpointRequiresMeReadPermission 驗證平臺首頁 endpoint requires me.read 權限。
-func TestPlatformHomeEndpointRequiresMeReadPermission(t *testing.T) {
+// TestPlatformAssistantsEndpointRequiresMeReadPermission verifies assistants require me.read.
+func TestPlatformAssistantsEndpointRequiresMeReadPermission(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
-	handler := newTestAPIForAccountNow("acct-no-platform-home", now, func(store *memory.Store) {
+	handler := newTestAPIForAccountNow("acct-no-platform-assistants", now, func(store *memory.Store) {
 		ctx := context.Background()
 		_ = store.UpsertAccount(ctx, domain.Account{
-			ID:          "acct-no-platform-home",
+			ID:          "acct-no-platform-assistants",
 			TenantID:    "demo",
-			DisplayName: "No Platform Home",
-			Email:       "no-platform-home@demo.local",
+			DisplayName: "No Platform Assistants",
+			Email:       "no-platform-assistants@demo.local",
 			EmployeeID:  "emp-employee",
 			Status:      "active",
 			CreatedAt:   now,
 		})
 		_ = store.UpsertUserIdentity(ctx, domain.UserIdentity{
-			ID:        "uid-no-platform-home",
+			ID:        "uid-no-platform-assistants",
 			TenantID:  "demo",
-			AccountID: "acct-no-platform-home",
+			AccountID: "acct-no-platform-assistants",
 			Provider:  "keycloak",
-			Subject:   "acct-no-platform-home",
-			Email:     "no-platform-home@demo.local",
+			Subject:   "acct-no-platform-assistants",
+			Email:     "no-platform-assistants@demo.local",
 			CreatedAt: now,
 		})
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/platform/home", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/platform/assistants", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -193,29 +193,8 @@ func TestPlatformHomeEndpointRequiresMeReadPermission(t *testing.T) {
 	}
 }
 
-// TestPlatformHomeEndpointReturnsHomeProjection 驗證平臺首頁 endpoint returns projection。
-func TestPlatformHomeEndpointReturnsHomeProjection(t *testing.T) {
-	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
-	handler := newTestAPIForAccountNow("acct-employee", now, nil)
-	req := httptest.NewRequest(http.MethodGet, "/v1/platform/home", nil)
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for platform home, got %d: %s", rec.Code, rec.Body.String())
-	}
-	body := decodeData[domain.PlatformHomeResponse](t, rec.Body.Bytes())
-	if len(body.Assistants) == 0 || len(body.FormColumns) == 0 {
-		t.Fatalf("expected assistants and form columns in home projection, got %+v", body)
-	}
-	if body.ClockSummary.CheckedOutAt != nil {
-		t.Fatalf("unexpected clock summary: %+v", body.ClockSummary)
-	}
-}
-
-// TestPlatformHomeEndpointSerializesEmptyFormColumnsAsArray keeps the HTTP contract aligned with OpenAPI.
-func TestPlatformHomeEndpointSerializesEmptyFormColumnsAsArray(t *testing.T) {
+// TestPlatformFormsEndpointSerializesEmptyCategoriesAsArray keeps the HTTP contract aligned with OpenAPI.
+func TestPlatformFormsEndpointSerializesEmptyCategoriesAsArray(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	handler := newTestAPIForAccountNow("acct-employee", now, func(store *memory.Store) {
 		templates, err := store.ListFormTemplates(context.Background(), "demo")
@@ -229,13 +208,13 @@ func TestPlatformHomeEndpointSerializesEmptyFormColumnsAsArray(t *testing.T) {
 			}
 		}
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/platform/home", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/platform/forms", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for platform home, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 for platform forms, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
 		Data map[string]any `json:"data"`
@@ -243,9 +222,9 @@ func TestPlatformHomeEndpointSerializesEmptyFormColumnsAsArray(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	columns, ok := payload.Data["form_columns"].([]any)
+	columns, ok := payload.Data["categories"].([]any)
 	if !ok || len(columns) != 0 {
-		t.Fatalf("expected form_columns to be an empty JSON array, got %#v", payload.Data["form_columns"])
+		t.Fatalf("expected categories to be an empty JSON array, got %#v", payload.Data["categories"])
 	}
 }
 

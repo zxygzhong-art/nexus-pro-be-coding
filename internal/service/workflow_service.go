@@ -1127,7 +1127,7 @@ func (c WorkflowService) accountMap(ctx RequestContext) (map[string]Account, err
 
 // employeeByAccountMap 處理員工 by 帳號 map 的服務流程。
 func (c WorkflowService) employeeByAccountMap(ctx RequestContext) (map[string]Employee, error) {
-	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	employees, err := c.Service.listBusinessEmployees(ctx)
 	if err != nil {
 		return nil, err
 	}

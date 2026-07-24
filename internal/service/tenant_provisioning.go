@@ -195,22 +195,31 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 
 // EnsureTenantDefaultFormTemplates 冪等補齊既有租戶缺少的內建表單，不覆蓋管理員已配置的同 key 模板。
 func (c *Service) EnsureTenantDefaultFormTemplates(ctx context.Context, tenantID string) (int, error) {
+	return c.EnsureTenantDefaultFormTemplatesForKeys(ctx, tenantID, nil)
+}
+
+// EnsureTenantDefaultFormTemplatesForKeys 冪等補齊指定 key 的內建表單；keys 為空時補齊全部。
+func (c *Service) EnsureTenantDefaultFormTemplatesForKeys(ctx context.Context, tenantID string, keys []string) (int, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		return 0, BadRequest("tenant_id is required")
+	}
+	selectedKeys, err := tenantDefaultFormTemplateKeySet(keys)
+	if err != nil {
+		return 0, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	created := 0
-	err := repository.WithinTenantTransaction(ctx, c.store, tenantID, func(tx repository.Store) error {
+	err = repository.WithinTenantTransaction(ctx, c.store, tenantID, func(tx repository.Store) error {
 		if _, ok, err := tx.GetTenant(ctx, tenantID); err != nil {
 			return err
 		} else if !ok {
 			return NotFound("tenant", tenantID)
 		}
 		var err error
-		created, err = ensureTenantDefaultFormTemplates(ctx, tx, tenantID, c.Now())
+		created, err = ensureTenantDefaultFormTemplatesForKeys(ctx, tx, tenantID, c.Now(), selectedKeys)
 		return err
 	})
 	return created, err
@@ -218,8 +227,17 @@ func (c *Service) EnsureTenantDefaultFormTemplates(ctx context.Context, tenantID
 
 // ensureTenantDefaultFormTemplates 只建立缺失的默認模板，保留租戶對現有模板的停用、刪除與自定義配置。
 func ensureTenantDefaultFormTemplates(ctx context.Context, store repository.Store, tenantID string, now time.Time) (int, error) {
+	return ensureTenantDefaultFormTemplatesForKeys(ctx, store, tenantID, now, nil)
+}
+
+func ensureTenantDefaultFormTemplatesForKeys(ctx context.Context, store repository.Store, tenantID string, now time.Time, selectedKeys map[string]struct{}) (int, error) {
 	created := 0
 	for _, template := range tenantDefaultFormTemplates(tenantID, now) {
+		if selectedKeys != nil {
+			if _, selected := selectedKeys[template.Key]; !selected {
+				continue
+			}
+		}
 		if err := validateWorkspaceFormDesignInput(platformTemplateFields(template.Key, template.Schema), platformTemplateStages(template.Schema)); err != nil {
 			return created, fmt.Errorf("validate default form template %s: %w", template.Key, err)
 		}
@@ -234,6 +252,25 @@ func ensureTenantDefaultFormTemplates(ctx context.Context, store repository.Stor
 		created++
 	}
 	return created, nil
+}
+
+func tenantDefaultFormTemplateKeySet(keys []string) (map[string]struct{}, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	available := make(map[string]struct{})
+	for _, definition := range tenantDefaultFormDefinitions() {
+		available[definition.Key] = struct{}{}
+	}
+	selected := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if _, ok := available[key]; !ok {
+			return nil, BadRequest(fmt.Sprintf("unknown default form template key: %s", key))
+		}
+		selected[key] = struct{}{}
+	}
+	return selected, nil
 }
 
 // normalizeTenantProvisionInput 正規化租戶開通輸入。

@@ -40,21 +40,21 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 	}
 	now := c.Now()
 	model, err := c.normalizeAgentModel(ctx, domain.AgentModel{
-		ID:       utils.NewID("amodel"),
-		TenantID: ctx.TenantID,
-		Name:     input.Name,
-		Provider:           input.Provider,
-		ModelName:          input.ModelName,
-		APIBaseURL:         input.APIBaseURL,
-		APIKey:             input.APIKey,
-		RateLimitRPM:       input.RateLimitRPM,
-		Status:             domain.AgentModelStatus(input.Status),
-		TimeoutSeconds:     input.TimeoutSeconds,
-		MonthlyQuota:       input.MonthlyQuota,
-		LastTestStatus:     "untested",
-		SyncStatus:         domain.AgentModelSyncStatusPending,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:             utils.NewID("amodel"),
+		TenantID:       ctx.TenantID,
+		Name:           input.Name,
+		Provider:       input.Provider,
+		ModelName:      input.ModelName,
+		APIBaseURL:     input.APIBaseURL,
+		APIKey:         input.APIKey,
+		RateLimitRPM:   input.RateLimitRPM,
+		Status:         domain.AgentModelStatus(input.Status),
+		TimeoutSeconds: input.TimeoutSeconds,
+		MonthlyQuota:   input.MonthlyQuota,
+		LastTestStatus: "untested",
+		SyncStatus:     domain.AgentModelSyncStatusPending,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	})
 	if err != nil {
 		return domain.AgentModel{}, err
@@ -309,10 +309,7 @@ func (c AgentService) ListDefinitions(ctx RequestContext) ([]domain.AgentDefinit
 		return nil, err
 	}
 	for index := range items {
-		items[index], err = c.definitionWithVersions(ctx, items[index])
-		if err != nil {
-			return nil, err
-		}
+		items[index] = normalizeAgentDefinitionResponse(items[index])
 	}
 	return items, nil
 }
@@ -374,15 +371,15 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 		UpdatedAt:                     now,
 	})
 	if err != nil {
-		return domain.AgentDefinition{}, err
+		return domain.AgentDefinition{}, fmt.Errorf("normalize agent definition: %w", err)
 	}
 	agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
-			return err
+			return fmt.Errorf("upsert agent definition: %w", err)
 		}
 		if err := tx.snapshotAgentDefinition(ctx, agent, account.ID, "initial version"); err != nil {
-			return err
+			return fmt.Errorf("snapshot agent definition: %w", err)
 		}
 		return tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "create", "agent created")
 	}); err != nil {
@@ -400,6 +397,14 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	agent, err := c.currentAgentDefinition(ctx, id)
 	if err != nil {
 		return domain.AgentDefinition{}, err
+	}
+	expectedVersion := agent.Version
+	if input.ExpectedVersion != nil {
+		expectedVersion = *input.ExpectedVersion
+		if expectedVersion != agent.Version {
+			return domain.AgentDefinition{}, Conflict("agent definition was updated; reload before saving").
+				WithReasonCode("agent_definition_version_conflict")
+		}
 	}
 	beforeRuntimeConfig := agentDefinitionRuntimeSignature(agent)
 	if input.Name != nil {
@@ -464,15 +469,29 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 		return domain.AgentDefinition{}, err
 	}
 	versionChanged := beforeRuntimeConfig != agentDefinitionRuntimeSignature(agent)
-	if versionChanged {
-		agent.Version++
-		agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
-	}
 	note := strings.TrimSpace(input.VersionNote)
 	if note == "" {
 		note = "updated"
 	}
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		claimedVersion, ok, claimErr := tx.store.ClaimAgentDefinitionRevision(
+			goContext(ctx),
+			ctx.TenantID,
+			agent.ID,
+			expectedVersion,
+			versionChanged,
+		)
+		if claimErr != nil {
+			return claimErr
+		}
+		if !ok {
+			return Conflict("agent definition was updated; reload before saving").
+				WithReasonCode("agent_definition_version_conflict")
+		}
+		agent.Version = claimedVersion
+		if versionChanged {
+			agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
+		}
 		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
 			return err
 		}
@@ -718,8 +737,7 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	agent.TimeoutSeconds = version.TimeoutSeconds
 	agent.MainAgentRole = version.MainAgentRole
 	agent.SubAgents = version.SubAgents
-	agent.Version++
-	agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
+	expectedVersion := agent.Version
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
 	agent, err = c.normalizeAgentDefinition(ctx, agent)
@@ -728,6 +746,22 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	}
 	detail := fmt.Sprintf("rollback to v%d", input.Version)
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		claimedVersion, claimed, claimErr := tx.store.ClaimAgentDefinitionRevision(
+			goContext(ctx),
+			ctx.TenantID,
+			agent.ID,
+			expectedVersion,
+			true,
+		)
+		if claimErr != nil {
+			return claimErr
+		}
+		if !claimed {
+			return Conflict("agent definition was updated; reload before rolling back").
+				WithReasonCode("agent_definition_version_conflict")
+		}
+		agent.Version = claimedVersion
+		agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
 		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
 			return err
 		}

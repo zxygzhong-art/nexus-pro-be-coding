@@ -263,8 +263,8 @@ func TestUpsertEHRMSOrgUnitsPreservesStableID(t *testing.T) {
 	}
 }
 
-// TestUpsertEHRMSOrgUnitsAttachesRootsToCanonicalRoot 驗證同步根部門會掛到既有頂層組織下。
-func TestUpsertEHRMSOrgUnitsAttachesRootsToCanonicalRoot(t *testing.T) {
+// TestUpsertEHRMSOrgUnitsKeepsEHRMSRootsIndependent 驗證管理員組織與 eHRMS 根部門保持並列。
+func TestUpsertEHRMSOrgUnitsKeepsEHRMSRootsIndependent(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
@@ -288,10 +288,17 @@ func TestUpsertEHRMSOrgUnitsAttachesRootsToCanonicalRoot(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected synced child, ok=%v err=%v", ok, err)
 	}
-	if root.ParentID != "ou-root" || len(root.Path) != 2 || root.Path[0] != "ou-root" {
-		t.Fatalf("expected synced root under canonical root, got %+v", root)
+	adminRoot, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "ou-root")
+	if err != nil || !ok {
+		t.Fatalf("expected admin root, ok=%v err=%v", ok, err)
 	}
-	if child.ParentID != "C01" || len(child.Path) != 3 || child.Path[0] != "ou-root" {
-		t.Fatalf("expected child path under canonical root, got %+v", child)
+	if adminRoot.ParentID != "" || len(adminRoot.Path) != 1 || adminRoot.Path[0] != "ou-root" {
+		t.Fatalf("expected admin root to remain independent, got %+v", adminRoot)
+	}
+	if root.ParentID != "" || len(root.Path) != 1 || root.Path[0] != "C01" {
+		t.Fatalf("expected eHRMS root to remain independent, got %+v", root)
+	}
+	if child.ParentID != "C01" || len(child.Path) != 2 || child.Path[0] != "C01" {
+		t.Fatalf("expected child path under eHRMS root, got %+v", child)
 	}
 }

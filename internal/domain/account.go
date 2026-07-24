@@ -179,7 +179,29 @@ var (
 	ErrIdentityPasswordRejected = errors.New("identity password was rejected")
 	// ErrIdentityPasswordUnavailable identifies missing credentials or an unavailable provider operation.
 	ErrIdentityPasswordUnavailable = errors.New("identity password change is unavailable")
+	// ErrIdentityProvisioningOwnershipConflict identifies a permanent attempt to bind an externally owned identity.
+	ErrIdentityProvisioningOwnershipConflict = errors.New("identity provisioning ownership conflict")
 )
+
+type identityProvisioningOwnershipConflictError struct {
+	message string
+}
+
+func (e identityProvisioningOwnershipConflictError) Error() string {
+	if strings.TrimSpace(e.message) == "" {
+		return ErrIdentityProvisioningOwnershipConflict.Error()
+	}
+	return e.message
+}
+
+func (identityProvisioningOwnershipConflictError) Unwrap() error {
+	return ErrIdentityProvisioningOwnershipConflict
+}
+
+// IdentityProvisioningOwnershipConflict preserves an actionable provider message while exposing permanent retry semantics.
+func IdentityProvisioningOwnershipConflict(message string) error {
+	return identityProvisioningOwnershipConflictError{message: strings.TrimSpace(message)}
+}
 
 // 下列常數定義此模組使用的固定值。
 const (

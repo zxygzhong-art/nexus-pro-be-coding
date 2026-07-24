@@ -47,6 +47,40 @@ func TestEmployeeCreateSucceedsAndKeepsOutboxPendingWhenKeycloakFails(t *testing
 	}
 }
 
+// TestEmployeeCreateStopsRetryingPermanentIdentityOwnershipConflict verifies deterministic collisions do not exhaust the retry budget.
+func TestEmployeeCreateStopsRetryingPermanentIdentityOwnershipConflict(t *testing.T) {
+	provisioner := &recordingIdentityProvisioner{
+		err: domain.IdentityProvisioningOwnershipConflict("keycloak user is already owned by another account"),
+	}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "create", Scope: "all"},
+	}, service.Options{IdentityProvisioner: provisioner})
+
+	input := validEmployeeInput("E1952", "Ownership Conflict", "ownership.conflict@example.com")
+	input.AccountPolicy = "create_active"
+	created, err := svc.HR().CreateEmployee(ctx, input)
+	if err != nil {
+		t.Fatalf("expected employee creation to remain durable despite provisioning conflict, got %v", err)
+	}
+	if created.AccountID == "" || len(provisioner.inputs) != 1 {
+		t.Fatalf("expected one provisioning attempt for the created account, employee=%+v attempts=%d", created, len(provisioner.inputs))
+	}
+	pending, err := store.ListPendingIdentityProvisioningOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected permanent ownership conflict to leave no pending retry, got %+v", pending)
+	}
+	processed, err := svc.ProcessIdentityProvisioningOutbox(context.Background(), "tenant-1", 25, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 || len(provisioner.inputs) != 1 {
+		t.Fatalf("expected failed event not to be reclaimed, processed=%d attempts=%d", processed, len(provisioner.inputs))
+	}
+}
+
 // TestEmployeeCreateFastPathWritesIdentityAndDrainsOutbox 驗證員工 create fast path writes 身分 and drains outbox。
 func TestEmployeeCreateFastPathWritesIdentityAndDrainsOutbox(t *testing.T) {
 	provisioner := &recordingIdentityProvisioner{}

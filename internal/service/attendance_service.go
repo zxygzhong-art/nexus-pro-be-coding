@@ -199,7 +199,7 @@ func (c AttendanceService) attendanceEmployeeScope(ctx RequestContext, account A
 	}
 	orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"])
 	if len(orgIDs) > 0 {
-		employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+		employees, err := c.Service.listBusinessEmployees(ctx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -227,6 +227,11 @@ func (c AttendanceService) requireAttendanceAuthz(ctx RequestContext, resource R
 
 // ensureAttendanceEmployeeAllowed 確保考勤員工 allowed 的服務流程。
 func (c AttendanceService) ensureAttendanceEmployeeAllowed(ctx RequestContext, account Account, decision CheckResult, employeeID string) error {
+	if _, ok, err := c.Service.getBusinessEmployee(ctx, employeeID); err != nil {
+		return err
+	} else if !ok {
+		return Forbidden("employee is not eligible for business attendance").WithReasonCode("attendance_employee_ineligible")
+	}
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
 		return err
@@ -256,7 +261,7 @@ func attendanceEmployeeAllowsActiveOperations(employee Employee) bool {
 // requireAttendanceEmployeeActive rejects attendance mutations before any business
 // record, workflow form, balance reservation, or mutation audit is created.
 func (c AttendanceService) requireAttendanceEmployeeActive(ctx RequestContext, employeeID string) (Employee, error) {
-	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, strings.TrimSpace(employeeID))
+	employee, ok, err := c.Service.getBusinessEmployee(ctx, employeeID)
 	if err != nil {
 		return Employee{}, err
 	}

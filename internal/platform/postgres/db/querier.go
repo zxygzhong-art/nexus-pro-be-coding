@@ -19,6 +19,7 @@ type Querier interface {
 	AppendStandaloneLeaveBalanceEntry(ctx context.Context, arg AppendStandaloneLeaveBalanceEntryParams) (LeaveBalanceEntry, error)
 	ArchiveAgentExternalToolCapabilitiesV2(ctx context.Context, arg ArchiveAgentExternalToolCapabilitiesV2Params) error
 	ClaimAgentConfirmationV2(ctx context.Context, arg ClaimAgentConfirmationV2Params) (ClaimAgentConfirmationV2Row, error)
+	ClaimAgentDefinitionRevision(ctx context.Context, arg ClaimAgentDefinitionRevisionParams) (int32, error)
 	ClaimFormBusinessRecordEffect(ctx context.Context, arg ClaimFormBusinessRecordEffectParams) (FormBusinessRecord, error)
 	ClaimIdentityProvisioningOutboxEvents(ctx context.Context, arg ClaimIdentityProvisioningOutboxEventsParams) ([]IdentityProvisioningOutbox, error)
 	// Atomically claim due rows and recover expired leases. The per-row token fences stale workers.
@@ -52,6 +53,7 @@ type Querier interface {
 	DeleteAgentModel(ctx context.Context, arg DeleteAgentModelParams) (DeleteAgentModelRow, error)
 	DeleteAgentSession(ctx context.Context, arg DeleteAgentSessionParams) (DeleteAgentSessionRow, error)
 	DeleteAssumableRole(ctx context.Context, arg DeleteAssumableRoleParams) (AssumableRole, error)
+	DeleteAttendanceDailyLeaveSegments(ctx context.Context, arg DeleteAttendanceDailyLeaveSegmentsParams) error
 	DeleteAuthzAssumableRoleSessionsForRole(ctx context.Context, arg DeleteAuthzAssumableRoleSessionsForRoleParams) error
 	DeleteAuthzDataScope(ctx context.Context, arg DeleteAuthzDataScopeParams) (AuthzDataScope, error)
 	DeleteAuthzFieldPolicy(ctx context.Context, arg DeleteAuthzFieldPolicyParams) (AuthzFieldPolicy, error)
@@ -88,8 +90,9 @@ type Querier interface {
 	GetAgentUsageSummary(ctx context.Context, tenantID string) (GetAgentUsageSummaryRow, error)
 	GetAssumableRole(ctx context.Context, arg GetAssumableRoleParams) (AssumableRole, error)
 	GetAttendanceClockRecordByClientEventID(ctx context.Context, arg GetAttendanceClockRecordByClientEventIDParams) (AttendanceClockRecord, error)
-	GetAttendanceDailySummaryByEmployeeDate(ctx context.Context, arg GetAttendanceDailySummaryByEmployeeDateParams) (AttendanceDailySummary, error)
-	GetAttendanceDailySummaryByExternalRef(ctx context.Context, arg GetAttendanceDailySummaryByExternalRefParams) (AttendanceDailySummary, error)
+	GetAttendanceDailyReconciliation(ctx context.Context, arg GetAttendanceDailyReconciliationParams) (AttendanceDailyReconciliation, error)
+	GetAttendanceDailyRecord(ctx context.Context, arg GetAttendanceDailyRecordParams) (AttendanceDailyRecord, error)
+	GetAttendanceDailyRecordByExternalRef(ctx context.Context, arg GetAttendanceDailyRecordByExternalRefParams) (AttendanceDailyRecord, error)
 	GetAttendanceDayProjection(ctx context.Context, arg GetAttendanceDayProjectionParams) (AttendanceDayProjection, error)
 	GetAttendanceDayProjectionForUpdate(ctx context.Context, arg GetAttendanceDayProjectionForUpdateParams) (AttendanceDayProjection, error)
 	GetAttendancePolicy(ctx context.Context, tenantID string) (AttendancePolicyVersion, error)
@@ -184,7 +187,8 @@ type Querier interface {
 	ListAssumableRoleTemplates(ctx context.Context, packageID string) ([]AssumableRoleTemplate, error)
 	ListAssumableRoles(ctx context.Context, tenantID string) ([]AssumableRole, error)
 	ListAttendanceClockRecords(ctx context.Context, arg ListAttendanceClockRecordsParams) ([]AttendanceClockRecord, error)
-	ListAttendanceDailySummaries(ctx context.Context, arg ListAttendanceDailySummariesParams) ([]AttendanceDailySummary, error)
+	ListAttendanceDailyLeaveSegments(ctx context.Context, arg ListAttendanceDailyLeaveSegmentsParams) ([]AttendanceDailyLeaveSegment, error)
+	ListAttendanceDailyRecords(ctx context.Context, arg ListAttendanceDailyRecordsParams) ([]AttendanceDailyRecord, error)
 	ListAttendanceDayProjections(ctx context.Context, arg ListAttendanceDayProjectionsParams) ([]AttendanceDayProjection, error)
 	ListAttendanceWorksites(ctx context.Context, tenantID string) ([]AttendanceWorksite, error)
 	ListAuditLogFacetSources(ctx context.Context, tenantID string) ([]ListAuditLogFacetSourcesRow, error)
@@ -198,6 +202,7 @@ type Querier interface {
 	ListAuthzRelationshipTuplesForObject(ctx context.Context, arg ListAuthzRelationshipTuplesForObjectParams) ([]AuthzRelationshipTuple, error)
 	ListCurrentAgentMessageAttachments(ctx context.Context, arg ListCurrentAgentMessageAttachmentsParams) ([]ListCurrentAgentMessageAttachmentsRow, error)
 	ListCurrentAgentSessionFiles(ctx context.Context, arg ListCurrentAgentSessionFilesParams) ([]ListCurrentAgentSessionFilesRow, error)
+	ListEHRMSLeaveRecordCandidates(ctx context.Context, arg ListEHRMSLeaveRecordCandidatesParams) ([]LeaveRecord, error)
 	ListEmployees(ctx context.Context, tenantID string) ([]Employee, error)
 	ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFilteredParams) ([]Employee, error)
 	ListEmployeesFilteredPage(ctx context.Context, arg ListEmployeesFilteredPageParams) ([]Employee, error)
@@ -274,6 +279,7 @@ type Querier interface {
 	// expected_version = 0 表示盲寫(新建或無條件覆蓋);> 0 時執行樂觀鎖檢查,
 	// 版本不符會因 WHERE 不成立而回傳零列(呼叫端轉為 Conflict)。
 	UpsertAccount(ctx context.Context, arg UpsertAccountParams) (Account, error)
+	UpsertAgentChatExecution(ctx context.Context, arg UpsertAgentChatExecutionParams) (int64, error)
 	UpsertAgentConfirmationV2(ctx context.Context, arg UpsertAgentConfirmationV2Params) (UpsertAgentConfirmationV2Row, error)
 	UpsertAgentDefinition(ctx context.Context, arg UpsertAgentDefinitionParams) (UpsertAgentDefinitionRow, error)
 	UpsertAgentExternalToolCapabilityV2(ctx context.Context, arg UpsertAgentExternalToolCapabilityV2Params) (ExternalTool, error)
@@ -287,7 +293,9 @@ type Querier interface {
 	UpsertAssumableRole(ctx context.Context, arg UpsertAssumableRoleParams) (AssumableRole, error)
 	UpsertAssumableRoleTemplate(ctx context.Context, arg UpsertAssumableRoleTemplateParams) (AssumableRoleTemplate, error)
 	UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAttendanceClockRecordParams) (AttendanceClockRecord, error)
-	UpsertAttendanceDailySummary(ctx context.Context, arg UpsertAttendanceDailySummaryParams) (AttendanceDailySummary, error)
+	UpsertAttendanceDailyLeaveSegment(ctx context.Context, arg UpsertAttendanceDailyLeaveSegmentParams) (AttendanceDailyLeaveSegment, error)
+	UpsertAttendanceDailyReconciliation(ctx context.Context, arg UpsertAttendanceDailyReconciliationParams) (AttendanceDailyReconciliation, error)
+	UpsertAttendanceDailyRecord(ctx context.Context, arg UpsertAttendanceDailyRecordParams) (AttendanceDailyRecord, error)
 	UpsertAttendanceDayProjection(ctx context.Context, arg UpsertAttendanceDayProjectionParams) (AttendanceDayProjection, error)
 	UpsertAttendanceWorksite(ctx context.Context, arg UpsertAttendanceWorksiteParams) (AttendanceWorksite, error)
 	UpsertAuthzDataScope(ctx context.Context, arg UpsertAuthzDataScopeParams) (AuthzDataScope, error)

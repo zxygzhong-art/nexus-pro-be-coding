@@ -590,6 +590,9 @@ func ValidateAndResolveBoundSubmissionValue(catalog domain.FormDataSourceCatalog
 	}
 	allowed := make(map[string]struct{}, len(source.Records))
 	for _, record := range source.Records {
+		if !recordMatchesFormDataSourceBinding(source.ID, record, binding.Filters) {
+			continue
+		}
 		allowed[dataSourceString(record[valueField])] = struct{}{}
 	}
 	values := []string{dataSourceString(value)}
@@ -608,6 +611,33 @@ func ValidateAndResolveBoundSubmissionValue(catalog domain.FormDataSourceCatalog
 		}
 	}
 	return value, true, ""
+}
+
+// recordMatchesFormDataSourceBinding keeps legacy employee bindings scoped to enabled staff
+// while allowing new forms to opt into explicit work-status combinations.
+func recordMatchesFormDataSourceBinding(sourceID string, record map[string]interface{}, filters map[string][]string) bool {
+	_, hasWorkStatusFilter := filters[formDataSourceWorkStatus]
+	if sourceID == formDataSourceEmployees && !hasWorkStatusFilter {
+		status := domain.NormalizeEmployeeStatus(dataSourceString(record[formDataSourceWorkStatus]))
+		return status != string(domain.EmployeeStatusResigned) && status != string(domain.EmployeeStatusDeleted)
+	}
+	for field, values := range filters {
+		if len(values) == 0 {
+			return false
+		}
+		actual := dataSourceString(record[field])
+		matched := false
+		for _, expected := range values {
+			if actual == expected {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func isEmptyFormPayloadValue(value any) bool {

@@ -26,6 +26,31 @@ func (s *Store) UpsertAgentSession(execCtx context.Context, v domain.AgentSessio
 		CreatedAt:      timestamptz(v.CreatedAt),
 		UpdatedAt:      timestamptz(v.UpdatedAt),
 	})
+	if isNotFound(err) {
+		// Data-modifying CTEs use one PostgreSQL snapshot. When both the
+		// conversation and its first segment are inserted by UpsertAgentSession,
+		// the final UPDATE cannot see that new conversation and the generated
+		// :one query reports pgx.ErrNoRows even though both inserts succeeded.
+		// Link the already-created rows in a follow-up statement. s.db is the
+		// current transaction when this store is transaction-scoped.
+		tag, reconcileErr := s.db.Exec(tenantContext(execCtx, v.TenantID), `
+UPDATE conversations
+SET current_segment_id = segments.id
+FROM conversation_segments segments
+WHERE conversations.tenant_id = $1
+  AND conversations.id = $2
+  AND segments.tenant_id = conversations.tenant_id
+  AND segments.conversation_id = conversations.id
+  AND segments.ordinal = GREATEST($3::bigint, 1)::integer
+`, v.TenantID, v.ID, v.ContextVersion)
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		if tag.RowsAffected() == 0 {
+			return err
+		}
+		return nil
+	}
 	return err
 }
 
@@ -222,7 +247,7 @@ func (s *Store) ListRecentAgentSessionMessages(execCtx context.Context, tenantID
 // FailStaleAgentRunsBySession closes interrupted runs without touching a live run inside its timeout window.
 func (s *Store) FailStaleAgentRunsBySession(execCtx context.Context, tenantID, sessionID string, staleBefore, failedAt time.Time, reason string) (int, error) {
 	result, err := s.db.Exec(tenantContext(execCtx, tenantID), `
-UPDATE executions
+UPDATE conversation_executions
 SET status = 'failed',
     completed_at = $4,
     error_code = CASE WHEN error_code = '' THEN 'interrupted' ELSE error_code END,

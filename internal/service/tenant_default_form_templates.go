@@ -19,7 +19,7 @@ type tenantDefaultFormDefinition struct {
 	Stages      []domain.PlatformFormBuilderStage
 }
 
-// tenantDefaultFormTemplates 建立表單中心的六份常用申請表單。
+// tenantDefaultFormTemplates 建立表單中心的常用申請表單。
 func tenantDefaultFormTemplates(tenantID string, now time.Time) []domain.FormTemplate {
 	definitions := tenantDefaultFormDefinitions()
 	templates := make([]domain.FormTemplate, 0, len(definitions))
@@ -61,6 +61,11 @@ func tenantDefaultFormDefinitions() []tenantDefaultFormDefinition {
 			Key: "resignation", Name: "離職及退休申請單", Description: "離職、退休手續辦理",
 			Category: "人資相關", Icon: "👋", FormKind: "custom",
 			Fields: tenantResignationFormFields(), Stages: tenantManagerHRApprovalStages(),
+		},
+		{
+			Key: "hr-handoff", Name: "HR 諮詢轉交單", Description: "制度文件不足、規則衝突或需要 HR 個案判斷時使用",
+			Category: "人資相關", Icon: "🎫", FormKind: "custom",
+			Fields: tenantHRHandoffFormFields(), Stages: tenantHROnlyApprovalStages(),
 		},
 	}
 }
@@ -244,6 +249,21 @@ func tenantResignationFormFields() []domain.PlatformFormBuilderField {
 	)
 }
 
+func tenantHRHandoffFormFields() []domain.PlatformFormBuilderField {
+	fields := tenantApplicantFields()
+	return append(fields,
+		domain.PlatformFormBuilderField{ID: "section-hr-handoff", Type: "section-title", Label: "轉交內容"},
+		domain.PlatformFormBuilderField{ID: "category", Type: "select", Label: "承辦類別", Placeholder: "請選擇", Required: true, Options: []domain.PlatformFormBuilderFieldOption{
+			{Label: "假勤制度", Value: "attendance"}, {Label: "福利與補助", Value: "benefits"},
+			{Label: "費用與出差", Value: "expenses"}, {Label: "員工資料", Value: "employee_data"},
+			{Label: "其他", Value: "other"},
+		}},
+		domain.PlatformFormBuilderField{ID: "question", Type: "textarea", Label: "員工問題", Placeholder: "請描述需要 HR 協助的問題", Required: true},
+		domain.PlatformFormBuilderField{ID: "checked_sources", Type: "multilist", Label: "已查資料來源", Placeholder: "填入已查閱的制度文件"},
+		domain.PlatformFormBuilderField{ID: "missing_information", Type: "textarea", Label: "仍缺資訊", Placeholder: "請說明制度文件未能回答的部分", Required: true},
+	)
+}
+
 // tenantManagerApprovalStages 建立直屬主管簽核流程。
 func tenantManagerApprovalStages() []domain.PlatformFormBuilderStage {
 	return []domain.PlatformFormBuilderStage{{ID: "stage-manager", Type: "approver", Label: "直屬主管", Detail: "依員工主管關係自動帶入", Config: map[string]any{"role": "manager"}}}
@@ -254,6 +274,12 @@ func tenantManagerHRApprovalStages() []domain.PlatformFormBuilderStage {
 	return []domain.PlatformFormBuilderStage{
 		{ID: "stage-manager", Type: "approver", Label: "直屬主管", Detail: "依員工主管關係自動帶入", Config: map[string]any{"role": "manager"}},
 		{ID: "stage-hr", Type: "approver", Label: "HR 複核", Detail: "由 HR 確認人事與出勤資料", Config: map[string]any{"role": "hr"}},
+	}
+}
+
+func tenantHROnlyApprovalStages() []domain.PlatformFormBuilderStage {
+	return []domain.PlatformFormBuilderStage{
+		{ID: "stage-hr", Type: "approver", Label: "HR 承辦", Detail: "由 HR 回覆制度或個案問題", Config: map[string]any{"role": "hr"}},
 	}
 }
 

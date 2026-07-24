@@ -94,6 +94,8 @@ var leaveBalanceFieldAliases = map[string]string{
 	"emp_id":              "員工編號",
 	"year":                "年度",
 	"leave_type":          "假別",
+	"name_zh":             "假別",
+	"name_en":             "假別",
 	"unit":                "單位",
 	"quota":               "額度",
 	"used":                "已使用",
@@ -120,6 +122,117 @@ var leaveDetailFieldAliases = map[string]string{
 	"source":              "資料來源",
 	"deduct_item":         "扣除項目",
 	"deduct_hours":        "扣除時間",
+}
+
+// flattenLeaveEntitlementRows expands /leave-entitlement nested payloads into flat
+// balance rows expected by SyncEHRMSAttendance leave-balance upsert.
+//
+// Upstream shape:
+//
+//	[{emp_id, year, unit, entitlements: {categoryCode: [{leave_code, quota, used, remaining, name_zh, ...}]}}]
+func flattenLeaveEntitlementRows(rows []map[string]any) []map[string]any {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		// Already-flat legacy/test rows (no entitlements object).
+		if _, hasNested := row["entitlements"]; !hasNested {
+			out = append(out, row)
+			continue
+		}
+		entitlements, _ := row["entitlements"].(map[string]any)
+		if len(entitlements) == 0 {
+			continue
+		}
+		for categoryCode, rawItems := range entitlements {
+			items, _ := rawItems.([]any)
+			for _, rawItem := range items {
+				item, ok := rawItem.(map[string]any)
+				if !ok || item == nil {
+					continue
+				}
+				flat := make(map[string]any, len(row)+len(item))
+				for key, value := range row {
+					if key != "entitlements" {
+						flat[key] = value
+					}
+				}
+				for key, value := range item {
+					flat[key] = value
+				}
+				flat["leave_category_code"] = categoryCode
+				if leaveType := firstNonEmptyJSONString(flat["leave_type"], flat["name_zh"], flat["name_en"], flat["leave_code"]); leaveType != "" {
+					flat["leave_type"] = leaveType
+				}
+				out = append(out, flat)
+			}
+		}
+	}
+	return out
+}
+
+// flattenLeaveDetailRows expands /leave nested payloads into flat detail rows.
+// Parent balances are ignored; only details[] are synced as leave records.
+//
+// Upstream shape:
+//
+//	[{emp_id, leave_type, leave_code, leave_category_code, balances: [...], details: [{date, start, end, hours, ...}]}]
+func flattenLeaveDetailRows(rows []map[string]any) []map[string]any {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		rawDetails, hasDetails := row["details"]
+		if !hasDetails {
+			// Already-flat legacy/test rows.
+			out = append(out, row)
+			continue
+		}
+		details, _ := rawDetails.([]any)
+		if len(details) == 0 {
+			continue
+		}
+		parent := make(map[string]any, len(row))
+		for key, value := range row {
+			if key != "balances" && key != "details" {
+				parent[key] = value
+			}
+		}
+		for _, rawDetail := range details {
+			detail, ok := rawDetail.(map[string]any)
+			if !ok || detail == nil {
+				continue
+			}
+			flat := make(map[string]any, len(detail)+4)
+			for key, value := range parent {
+				if value != nil {
+					flat[key] = value
+				}
+			}
+			for key, value := range detail {
+				flat[key] = value
+			}
+			out = append(out, flat)
+		}
+	}
+	return out
+}
+
+func firstNonEmptyJSONString(values ...any) string {
+	for _, value := range values {
+		if text := strings.TrimSpace(stringValueFromJSON(value)); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 var leaveTypeFieldAliases = map[string]string{
@@ -244,7 +357,13 @@ func normalizeLeaveBalanceRecords(rows []domain.EHRMSLeaveBalanceRecord) []domai
 }
 
 func normalizeLeaveBalanceRecord(row domain.EHRMSLeaveBalanceRecord) domain.EHRMSLeaveBalanceRecord {
-	return domain.EHRMSLeaveBalanceRecord(applyFieldAliases(map[string]string(row), leaveBalanceFieldAliases))
+	values := map[string]string(row)
+	if strings.TrimSpace(values["假別"]) == "" {
+		values["假別"] = firstNonEmptyString(
+			values["leave_type"], values["name_zh"], values["name_en"], values["leave_code"],
+		)
+	}
+	return domain.EHRMSLeaveBalanceRecord(applyFieldAliases(values, leaveBalanceFieldAliases))
 }
 
 func normalizeLeaveDetailRecords(rows []domain.EHRMSLeaveDetailRecord) []domain.EHRMSLeaveDetailRecord {
@@ -259,7 +378,20 @@ func normalizeLeaveDetailRecords(rows []domain.EHRMSLeaveDetailRecord) []domain.
 }
 
 func normalizeLeaveDetailRecord(row domain.EHRMSLeaveDetailRecord) domain.EHRMSLeaveDetailRecord {
-	return domain.EHRMSLeaveDetailRecord(applyFieldAliases(map[string]string(row), leaveDetailFieldAliases))
+	values := map[string]string(row)
+	if strings.TrimSpace(values["假別"]) == "" {
+		values["假別"] = firstNonEmptyString(values["leave_type"], values["leave_code"])
+	}
+	return domain.EHRMSLeaveDetailRecord(applyFieldAliases(values, leaveDetailFieldAliases))
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func normalizeLeaveTypeRecords(rows []domain.EHRMSLeaveTypeRecord) []domain.EHRMSLeaveTypeRecord {

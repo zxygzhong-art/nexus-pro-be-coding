@@ -1683,6 +1683,123 @@ func (q *Queries) UpdateAgentConfirmationV2(ctx context.Context, arg UpdateAgent
 	return i, err
 }
 
+const upsertAgentChatExecution = `-- name: UpsertAgentChatExecution :execrows
+INSERT INTO conversation_executions (
+    id, tenant_id, account_id, conversation_id, segment_id, input_message_id,
+    agent_id, agent_revision_id, model_connection_id,
+    mode, trigger_type, status, queued_at, started_at, completed_at,
+    error_code, error_category, safe_error_message,
+    llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens,
+    usage_complete, created_at, updated_at
+)
+SELECT
+    $1, $2, $3,
+    messages.conversation_id, messages.segment_id, messages.id,
+    NULLIF($4::text, ''),
+    NULLIF($5::text, ''),
+    NULLIF($6::text, ''),
+    $7, 'chat', $8, $9,
+    CASE
+        WHEN $8::text = 'queued' THEN NULL
+        ELSE $10::timestamptz
+    END,
+    CASE
+        WHEN $8::text IN ('completed', 'failed', 'cancelled')
+            THEN $10::timestamptz
+        ELSE NULL
+    END,
+    $11, $12,
+    CASE WHEN $8::text = 'failed' THEN $13::text ELSE '' END,
+    $14, $15, $16,
+    $17, $18, $19,
+    $9, $10
+FROM conversation_messages messages
+JOIN conversations
+  ON conversations.tenant_id = messages.tenant_id
+ AND conversations.id = messages.conversation_id
+ AND conversations.current_segment_id = messages.segment_id
+WHERE messages.tenant_id = $2
+  AND messages.id = $20
+  AND messages.conversation_id = $21
+  AND messages.segment_id = $22
+  AND messages.role = 'user'
+  AND conversations.owner_account_id = $3
+ON CONFLICT (id) DO UPDATE SET
+    status = EXCLUDED.status,
+    started_at = CASE
+        WHEN EXCLUDED.status = 'queued' THEN conversation_executions.started_at
+        ELSE COALESCE(conversation_executions.started_at, EXCLUDED.started_at)
+    END,
+    completed_at = EXCLUDED.completed_at,
+    error_code = EXCLUDED.error_code,
+    error_category = EXCLUDED.error_category,
+    safe_error_message = EXCLUDED.safe_error_message,
+    llm_call_count = EXCLUDED.llm_call_count,
+    input_tokens = EXCLUDED.input_tokens,
+    cached_tokens = EXCLUDED.cached_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    total_tokens = EXCLUDED.total_tokens,
+    usage_complete = EXCLUDED.usage_complete,
+    updated_at = EXCLUDED.updated_at
+WHERE conversation_executions.tenant_id = EXCLUDED.tenant_id
+`
+
+type UpsertAgentChatExecutionParams struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	AgentID           string             `json:"agent_id"`
+	AgentRevisionID   string             `json:"agent_revision_id"`
+	ModelConnectionID string             `json:"model_connection_id"`
+	Mode              string             `json:"mode"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ErrorCode         string             `json:"error_code"`
+	ErrorCategory     string             `json:"error_category"`
+	SafeErrorMessage  string             `json:"safe_error_message"`
+	LlmCallCount      int64              `json:"llm_call_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	UsageComplete     bool               `json:"usage_complete"`
+	InputMessageID    string             `json:"input_message_id"`
+	SessionID         string             `json:"session_id"`
+	SegmentID         string             `json:"segment_id"`
+}
+
+func (q *Queries) UpsertAgentChatExecution(ctx context.Context, arg UpsertAgentChatExecutionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertAgentChatExecution,
+		arg.ID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.AgentID,
+		arg.AgentRevisionID,
+		arg.ModelConnectionID,
+		arg.Mode,
+		arg.Status,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.ErrorCode,
+		arg.ErrorCategory,
+		arg.SafeErrorMessage,
+		arg.LlmCallCount,
+		arg.InputTokens,
+		arg.CachedTokens,
+		arg.OutputTokens,
+		arg.TotalTokens,
+		arg.UsageComplete,
+		arg.InputMessageID,
+		arg.SessionID,
+		arg.SegmentID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertAgentConfirmationV2 = `-- name: UpsertAgentConfirmationV2 :one
 WITH inserted AS (
     INSERT INTO agent_confirmations (

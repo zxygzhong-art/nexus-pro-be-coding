@@ -248,13 +248,24 @@ func keycloakProvisioningAttributes(input domain.IdentityProvisioningInput, exis
 func validateKeycloakUserOwnership(input domain.IdentityProvisioningInput, attributes map[string][]string) error {
 	existingTenant := firstKeycloakAttribute(attributes, "tenant_id")
 	if existingTenant != "" && existingTenant != strings.TrimSpace(input.TenantID) {
-		return errors.New("keycloak user is already owned by another tenant")
+		return domain.IdentityProvisioningOwnershipConflict("keycloak user is already owned by another tenant")
 	}
 	existingAccount := firstKeycloakAttribute(attributes, "account_id")
-	if existingAccount != "" && existingAccount != strings.TrimSpace(input.AccountID) {
-		return errors.New("keycloak user is already owned by another account")
+	if existingAccount != "" && existingAccount != strings.TrimSpace(input.AccountID) && !sameKeycloakEmployee(input, attributes) {
+		return domain.IdentityProvisioningOwnershipConflict("keycloak user is already owned by another account")
 	}
 	return nil
+}
+
+// sameKeycloakEmployee permits account-ID rotation only when an immutable-in-practice employee key still matches.
+func sameKeycloakEmployee(input domain.IdentityProvisioningInput, attributes map[string][]string) bool {
+	existingEmployeeID := firstKeycloakAttribute(attributes, "employee_id")
+	if employeeID := strings.TrimSpace(input.EmployeeID); employeeID != "" && existingEmployeeID != "" && existingEmployeeID == employeeID {
+		return true
+	}
+	existingEmployeeNo := firstKeycloakAttribute(attributes, "employee_no")
+	employeeNo := strings.TrimSpace(input.EmployeeNo)
+	return employeeNo != "" && existingEmployeeNo != "" && existingEmployeeNo == employeeNo
 }
 
 // firstKeycloakAttribute 取得 Keycloak 單值 ownership attribute。

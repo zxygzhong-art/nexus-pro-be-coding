@@ -26,16 +26,18 @@ func TestLeaveStorageUsesThreeAnnualTables(t *testing.T) {
 
 	records := normalizedTableDefinition(t, schema, "leave_records")
 	requireSQLFragments(t, records, []string{
-		"balance_id text NOT NULL",
+		"balance_id text",
 		"entitlement_year integer NOT NULL",
 		"source text NOT NULL CHECK (source IN ('nexus', 'ehrms'))",
+		"external_ref text NOT NULL DEFAULT ''",
 		"event_date timestamptz NOT NULL",
 		"matched_record_id text",
+		"balance_match_status text NOT NULL DEFAULT 'matched'",
 		"CONSTRAINT leave_records_year_check CHECK",
 		"REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id, entitlement_year)",
 	})
 	forbidSQLFragments(t, records, []string{
-		"external_ref", "leave_name", "gross_minutes", "deduct_minutes",
+		"balance_id text NOT NULL", "leave_name", "gross_minutes", "deduct_minutes",
 		"source_label", "raw_payload", "payload_hash", "first_seen_at",
 	})
 
@@ -75,8 +77,10 @@ func TestLeaveQueriesUseDirectRecordAndAnnualBalance(t *testing.T) {
 	upsert := normalizedNamedQuery(t, queries, "UpsertLeaveRecord")
 	requireSQLFragments(t, upsert, []string{
 		"INSERT INTO leave_records",
+		"sqlc.narg(balance_id)",
 		"matched_record_id",
 		"reconciliation_status",
+		"balance_match_status",
 	})
 	forbidSQLFragments(t, normalizeSQL(queries), []string{
 		"leave_request_allocations", "leave_cases", "leave_external_records", "leave_case_sources",
@@ -113,6 +117,85 @@ func TestLeaveStorageIsSquashedIntoPostInitMigration(t *testing.T) {
 		"CREATE TABLE leave_external_records (",
 		"CREATE TABLE leave_case_sources (",
 		"CREATE TABLE leave_balance_ledger (",
+	})
+}
+
+func TestAttendanceDailyLeaveSegmentsKeepLeaveReconciliationSeparate(t *testing.T) {
+	schema := readLeaveSchemaFile(t, "../../../db/schema.sql")
+	records := normalizedTableDefinition(t, schema, "attendance_daily_records")
+	requireSQLFragments(t, records, []string{
+		"PRIMARY KEY (tenant_id, employee_id, work_date, source)",
+		"source IN ('local', 'ehrms')",
+		"credited_leave_minutes integer NOT NULL",
+		"input_fingerprint text NOT NULL",
+	})
+	segments := normalizedTableDefinition(t, schema, "attendance_daily_leave_segments")
+	requireSQLFragments(t, segments, []string{
+		"PRIMARY KEY (tenant_id, employee_id, work_date, daily_source, segment_no)",
+		"REFERENCES attendance_daily_records (tenant_id, employee_id, work_date, source) ON DELETE CASCADE",
+		"REFERENCES leave_records (tenant_id, id)",
+		"link_status IN ('unmatched', 'matched', 'mismatch', 'ambiguous')",
+		"candidate_record_ids text[] NOT NULL",
+	})
+	reconciliations := normalizedTableDefinition(t, schema, "attendance_daily_reconciliations")
+	requireSQLFragments(t, reconciliations, []string{
+		"status IN ('matched', 'mismatch', 'local_only', 'ehrms_only')",
+		"differences jsonb NOT NULL",
+		"resolution_status IN ('unresolved', 'accepted_local', 'accepted_ehrms', 'ignored')",
+	})
+	requireSQLFragments(t, normalizeSQL(schema), []string{
+		"ALTER TABLE attendance_daily_records ENABLE ROW LEVEL SECURITY",
+		"ALTER TABLE attendance_daily_leave_segments ENABLE ROW LEVEL SECURITY",
+		"ALTER TABLE attendance_daily_reconciliations ENABLE ROW LEVEL SECURITY",
+		"CREATE POLICY tenant_isolation_attendance_daily_leave_segments",
+	})
+
+	queries := readLeaveSchemaFile(t, "../../../db/queries/core.sql")
+	for _, name := range []string{
+		"UpsertAttendanceDailyRecord",
+		"GetAttendanceDailyRecord",
+		"ListAttendanceDailyRecords",
+		"DeleteAttendanceDailyLeaveSegments",
+		"UpsertAttendanceDailyLeaveSegment",
+		"ListAttendanceDailyLeaveSegments",
+		"ListEHRMSLeaveRecordCandidates",
+		"UpsertAttendanceDailyReconciliation",
+		"GetAttendanceDailyReconciliation",
+	} {
+		_ = normalizedNamedQuery(t, queries, name)
+	}
+
+	migration := normalizeSQL(readLeaveSchemaFile(t, "../../../db/migrations/000002_post_init_updates.sql"))
+	requireSQLFragments(t, migration, []string{
+		"CREATE TABLE attendance_daily_records",
+		"CREATE TABLE attendance_daily_leave_segments",
+		"CREATE TABLE attendance_daily_reconciliations",
+		"CREATE POLICY tenant_isolation_attendance_daily_leave_segments",
+	})
+}
+
+func TestAttendanceDailySummariesRetiredAfterUnifiedDailyRecords(t *testing.T) {
+	schema := normalizeSQL(readLeaveSchemaFile(t, "../../../db/schema.sql"))
+	if strings.Contains(schema, "CREATE TABLE attendance_daily_summaries") {
+		t.Fatal("canonical schema must not recreate retired attendance_daily_summaries")
+	}
+	queries := readLeaveSchemaFile(t, "../../../db/queries/core.sql")
+	for _, name := range []string{
+		"UpsertAttendanceDailySummary",
+		"GetAttendanceDailySummaryByExternalRef",
+		"GetAttendanceDailySummaryByEmployeeDate",
+		"ListAttendanceDailySummaries",
+	} {
+		if strings.Contains(queries, "-- name: "+name+" ") {
+			t.Fatalf("retired summary query still exists: %s", name)
+		}
+	}
+	migration := normalizeSQL(readLeaveSchemaFile(t, "../../../db/migrations/000002_post_init_updates.sql"))
+	if strings.Contains(migration, "CREATE TABLE attendance_daily_summaries") {
+		t.Fatal("000002 must not recreate retired attendance_daily_summaries")
+	}
+	requireSQLFragments(t, migration, []string{
+		"CREATE TABLE attendance_daily_records",
 	})
 }
 

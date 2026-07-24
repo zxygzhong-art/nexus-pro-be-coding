@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"strings"
 	"time"
 )
@@ -90,7 +91,52 @@ func (c AttendanceService) AttendanceMonthlySummary(ctx RequestContext, month st
 			AnomalyReasons: projection.AnomalyReasons,
 		})
 	}
+	leaveDays, overtimeHours, err := c.attendanceMonthlyLeaveAndOvertime(ctx, employeeID, start, end)
+	if err != nil {
+		return AttendanceMonthlySummary{}, err
+	}
+	result.LeaveDays = leaveDays
+	result.OvertimeHours = overtimeHours
 	return result, nil
+}
+
+// attendanceMonthlyLeaveAndOvertime sums approved leave/overtime that overlaps the month.
+// Leave is reported in day units (8h = 1 day) to match the home clock card contract.
+func (c AttendanceService) attendanceMonthlyLeaveAndOvertime(ctx RequestContext, employeeID string, start, endInclusive time.Time) (float64, float64, error) {
+	endExclusive := endInclusive.AddDate(0, 0, 1)
+	leaveHours := 0.0
+	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
+		EmployeeIDs: []string{employeeID},
+		Status:      "approved",
+		FromDate:    start.Format(time.DateOnly),
+		ToDate:      endInclusive.Format(time.DateOnly),
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, leave := range leaves {
+		if leave.EmployeeID != employeeID || leave.EndAt.Before(start) || !leave.StartAt.Before(endExclusive) {
+			continue
+		}
+		leaveHours += float64(leave.RequestedMinutes) / 60
+	}
+	overtimeHours := 0.0
+	overtimes, err := c.store.ListOvertimeRequestsByQuery(goContext(ctx), ctx.TenantID, OvertimeRequestQuery{
+		EmployeeIDs: []string{employeeID},
+		Status:      "approved",
+		FromDate:    start.Format(time.DateOnly),
+		ToDate:      endInclusive.Format(time.DateOnly),
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, overtime := range overtimes {
+		if overtime.EmployeeID != employeeID || overtime.EndAt.Before(start) || !overtime.StartAt.Before(endExclusive) {
+			continue
+		}
+		overtimeHours += overtime.Hours
+	}
+	return math.Round((leaveHours/workspaceDayHours)*10) / 10, overtimeHours, nil
 }
 
 // attendanceMonthlyProjectionDates returns the union of raw-punch dates and

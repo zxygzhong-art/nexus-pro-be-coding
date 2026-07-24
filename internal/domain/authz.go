@@ -291,7 +291,6 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "attendance.correction.create", Method: "POST", Path: "/v1/attendance/corrections", ApplicationCode: "attendance", ResourceType: "correction", Action: "create"},
 	{Name: "attendance.correction.approve", Method: "POST", Path: "/v1/attendance/corrections/:id/approve", ApplicationCode: "attendance", ResourceType: "correction", Action: "approve", RiskLevel: RiskHigh},
 	{Name: "attendance.correction.reject", Method: "POST", Path: "/v1/attendance/corrections/:id/reject", ApplicationCode: "attendance", ResourceType: "correction", Action: "update", RiskLevel: RiskHigh},
-	{Name: "platform.home.read", Method: "GET", Path: "/v1/platform/home", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "platform.assistants.read", Method: "GET", Path: "/v1/platform/assistants", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "platform.forms.read", Method: "GET", Path: "/v1/platform/forms", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "platform.tasks.read", Method: "GET", Path: "/v1/platform/tasks", ApplicationCode: "platform", ResourceType: "me", Action: "read"},

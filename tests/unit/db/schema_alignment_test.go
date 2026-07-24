@@ -34,6 +34,57 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 	}
 }
 
+func TestEHRMSPersistenceIntegrityContract(t *testing.T) {
+	schemaRaw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryRaw, err := os.ReadFile("../../../db/queries/core.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(schemaRaw)
+	query := string(queryRaw)
+	for _, fragment := range []string{
+		"external_source text NOT NULL DEFAULT ''",
+		"external_employee_id text NOT NULL DEFAULT ''",
+		"CREATE UNIQUE INDEX employees_tenant_external_identity_idx",
+		"source_payload jsonb NOT NULL DEFAULT '{}'::jsonb",
+		"balance_id text,",
+		"balance_match_status text NOT NULL DEFAULT 'matched'",
+		"CREATE UNIQUE INDEX leave_records_tenant_source_external_ref_idx",
+		"CONSTRAINT leave_balances_nonnegative_check CHECK (",
+		"granted_minutes >= 0 AND used_minutes >= 0",
+	} {
+		if !strings.Contains(schema, fragment) {
+			t.Fatalf("expected EHRMS integrity schema fragment %q", fragment)
+		}
+	}
+	if strings.Contains(schema, "    balance_id text NOT NULL,\n    entitlement_year integer NOT NULL") {
+		t.Fatal("EHRMS leave details must not require an annual balance before persistence")
+	}
+
+	start := strings.Index(query, "-- name: UpsertEmployee :one")
+	if start < 0 {
+		t.Fatal("expected UpsertEmployee query boundaries")
+	}
+	endOffset := strings.Index(query[start:], "-- name: GetEmployee :one")
+	if endOffset < 0 {
+		t.Fatal("expected UpsertEmployee query boundaries")
+	}
+	employeeUpsert := query[start : start+endOffset]
+	if strings.Contains(employeeUpsert, "    tenant_id = EXCLUDED.tenant_id,") {
+		t.Fatal("employee upsert must never move a globally identified row across tenants")
+	}
+	if !strings.Contains(employeeUpsert, "WHERE employees.tenant_id = EXCLUDED.tenant_id") {
+		t.Fatal("employee upsert must reject an ID collision owned by another tenant")
+	}
+	if !strings.Contains(query, "sqlc.narg(balance_id)") ||
+		!strings.Contains(query, "balance_match_status = EXCLUDED.balance_match_status") {
+		t.Fatal("leave record persistence must support an unmatched balance state")
+	}
+}
+
 // TestOutboxReliabilityContractStayInSchema keeps rolling-deploy-safe explicit
 // projections and the lease/idempotency indexes aligned with the domain model.
 func TestOutboxReliabilityContractStayInSchema(t *testing.T) {

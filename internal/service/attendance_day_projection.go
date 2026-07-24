@@ -141,6 +141,10 @@ func (c AttendanceService) loadAttendanceDayProjection(ctx RequestContext, emplo
 // projection. The persisted row is a rebuildable cache; raw clocks, canonical
 // leave facts, and the policy version remain authoritative.
 func (c AttendanceService) projectAndPersistAttendanceDay(ctx RequestContext, employeeID string, records []AttendanceClockRecord, leaves []attendanceEffectiveLeave, workDate string, policy AttendancePolicyResponse, asOf time.Time) (domain.AttendanceDayProjection, error) {
+	policy, err := c.ensureAttendancePolicyVersionForProjection(ctx, policy)
+	if err != nil {
+		return domain.AttendanceDayProjection{}, err
+	}
 	leaves = attendanceEffectiveLeavesForProjection(leaves, employeeID, workDate, policy.WorkTime)
 	fingerprint := attendanceProjectionFingerprint(records, leaves, workDate, policy, asOf)
 	stored, ok, err := c.store.GetAttendanceDayProjection(goContext(ctx), ctx.TenantID, employeeID, workDate)
@@ -149,6 +153,9 @@ func (c AttendanceService) projectAndPersistAttendanceDay(ctx RequestContext, em
 	}
 	if ok && stored.InputFingerprint == fingerprint {
 		materializeAttendanceProjectionRecords(&stored, records)
+		if err := c.upsertLocalAttendanceDailyRecord(ctx, stored); err != nil {
+			return domain.AttendanceDayProjection{}, err
+		}
 		return stored, nil
 	}
 	projection, err := c.projectAttendanceDayWithCanonicalLeave(ctx, records, leaves, workDate, policy.WorkTime, asOf)
@@ -165,7 +172,37 @@ func (c AttendanceService) projectAndPersistAttendanceDay(ctx RequestContext, em
 	if err := c.store.UpsertAttendanceDayProjection(goContext(ctx), projection); err != nil {
 		return domain.AttendanceDayProjection{}, err
 	}
+	if err := c.upsertLocalAttendanceDailyRecord(ctx, projection); err != nil {
+		return domain.AttendanceDayProjection{}, err
+	}
 	return projection, nil
+}
+
+// ensureAttendancePolicyVersionForProjection materializes the synthetic default
+// policy when a tenant has no attendance_policy_versions rows. Projection rows
+// FK to (tenant_id, policy_version), so Version:1 defaults must exist before upsert.
+func (c AttendanceService) ensureAttendancePolicyVersionForProjection(ctx RequestContext, policy AttendancePolicyResponse) (AttendancePolicyResponse, error) {
+	_, exists, err := c.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	if exists {
+		return policy, nil
+	}
+	baseline := defaultAttendancePolicyVersion(ctx.TenantID, c.Now())
+	if err := c.store.InsertAttendancePolicyVersion(goContext(ctx), baseline); err != nil {
+		if appErr, ok := domain.AsAppError(err); ok && appErr.Status == 409 {
+			reloaded, ok, reloadErr := c.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
+			if reloadErr != nil {
+				return AttendancePolicyResponse{}, reloadErr
+			}
+			if ok {
+				return attendancePolicyResponse(reloaded), nil
+			}
+		}
+		return AttendancePolicyResponse{}, err
+	}
+	return attendancePolicyResponse(baseline), nil
 }
 
 func attendanceEffectiveLeavesForProjection(leaves []attendanceEffectiveLeave, employeeID, workDate string, workTime AttendancePolicyWorkTime) []attendanceEffectiveLeave {
@@ -253,10 +290,11 @@ func attendanceProjectionHasOpenClock(records []AttendanceClockRecord, workDate 
 	return effective[len(effective)-1].Direction == clockDirectionIn
 }
 
-// projectAttendanceDays refreshes every employee-day that currently has a raw
-// source or an existing persisted row, then returns the read-model view used by
-// workspace reporting. Existing rows are candidates too so void/cancellation
-// can actively replace stale non-zero projections.
+// projectAttendanceDays builds the workspace report without mutating read
+// models. It reuses the projections loaded in bulk and computes stale or
+// missing employee-days in memory so a GET never triggers reconciliation
+// writes. Existing rows remain candidates so void/cancellation can replace
+// stale non-zero values in the response.
 func (c AttendanceService) projectAttendanceDays(ctx RequestContext, employeeIDs []string, records []AttendanceClockRecord, leaves []attendanceEffectiveLeave, policies map[string]AttendancePolicyResponse, fromDate, toDate string, asOf time.Time) (map[string]map[string]domain.AttendanceDayProjection, error) {
 	employeeIDs = employeeIDsFromSlice(employeeIDs)
 	out := map[string]map[string]domain.AttendanceDayProjection{}
@@ -272,6 +310,7 @@ func (c AttendanceService) projectAttendanceDays(ctx RequestContext, employeeIDs
 		return nil, err
 	}
 	candidates := map[string]map[string]struct{}{}
+	existingByEmployeeDate := map[string]map[string]domain.AttendanceDayProjection{}
 	recordsByEmployeeDate := map[string]map[string][]AttendanceClockRecord{}
 	addCandidate := func(employeeID, workDate string) {
 		if employeeID == "" || workDate == "" {
@@ -283,6 +322,10 @@ func (c AttendanceService) projectAttendanceDays(ctx RequestContext, employeeIDs
 		candidates[employeeID][workDate] = struct{}{}
 	}
 	for _, stored := range existing {
+		if existingByEmployeeDate[stored.EmployeeID] == nil {
+			existingByEmployeeDate[stored.EmployeeID] = map[string]domain.AttendanceDayProjection{}
+		}
+		existingByEmployeeDate[stored.EmployeeID][stored.WorkDate] = stored
 		addCandidate(stored.EmployeeID, stored.WorkDate)
 	}
 	for _, record := range records {
@@ -322,9 +365,24 @@ func (c AttendanceService) projectAttendanceDays(ctx RequestContext, employeeIDs
 			if !ok {
 				return nil, fmt.Errorf("attendance policy missing for work date %s", workDate)
 			}
-			projection, err := c.projectAndPersistAttendanceDay(ctx, employeeID, recordsByEmployeeDate[employeeID][workDate], leaves, workDate, policy, asOf)
-			if err != nil {
-				return nil, err
+			dayRecords := recordsByEmployeeDate[employeeID][workDate]
+			dayLeaves := attendanceEffectiveLeavesForProjection(leaves, employeeID, workDate, policy.WorkTime)
+			fingerprint := attendanceProjectionFingerprint(dayRecords, dayLeaves, workDate, policy, asOf)
+			projection, exists := existingByEmployeeDate[employeeID][workDate]
+			if exists && projection.InputFingerprint == fingerprint {
+				materializeAttendanceProjectionRecords(&projection, dayRecords)
+			} else {
+				projection, err = c.projectAttendanceDayWithCanonicalLeave(ctx, dayRecords, dayLeaves, workDate, policy.WorkTime, asOf)
+				if err != nil {
+					return nil, err
+				}
+				projection.TenantID = ctx.TenantID
+				projection.EmployeeID = employeeID
+				projection.WorkDate = workDate
+				projection.PolicyVersion = policy.Version
+				projection.InputFingerprint = fingerprint
+				projection.ComputedAt = asOf
+				projection.UpdatedAt = asOf
 			}
 			if out[employeeID] == nil {
 				out[employeeID] = map[string]domain.AttendanceDayProjection{}

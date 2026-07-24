@@ -69,7 +69,7 @@ func TestPlatformClockSummaryIsOptionalInAggregates(t *testing.T) {
 	if err := yaml.Unmarshal(readOpenAPI(t), &doc); err != nil {
 		t.Fatalf("openapi.yaml should parse as YAML: %v", err)
 	}
-	for _, name := range []string{"PlatformHomeResponse", "PlatformTasksResponse"} {
+	for _, name := range []string{"PlatformAssistantsResponse", "PlatformTasksResponse"} {
 		schema, ok := doc.Components.Schemas[name]
 		if !ok {
 			t.Fatalf("expected OpenAPI schema %s", name)

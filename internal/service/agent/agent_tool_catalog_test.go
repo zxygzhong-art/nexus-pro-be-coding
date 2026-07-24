@@ -18,8 +18,8 @@ func TestAgentToolCatalogMatchesRuntimeRegistry(t *testing.T) {
 	}, nil)
 	catalog := domain.AgentToolCatalog()
 
-	if len(catalog) != 24 {
-		t.Fatalf("expected 24 catalog tools, got %d", len(catalog))
+	if len(catalog) != 38 {
+		t.Fatalf("expected 38 catalog tools, got %d", len(catalog))
 	}
 	if len(runtimeTools) != len(catalog) {
 		t.Fatalf("catalog/runtime count mismatch: catalog=%d runtime=%d", len(catalog), len(runtimeTools))

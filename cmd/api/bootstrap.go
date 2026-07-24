@@ -870,14 +870,18 @@ func configuredEHRMSClient(cfg config.Config, client *http.Client, logger *slog.
 		logger.Error("ehrms client initialization failed", "base_url", startup.SafeURL(cfg.EHRMSBaseURL), "error", err)
 		return nil, dependency, err
 	}
-	clientAdapter.WithRequestInterval(cfg.EHRMSRequestInterval)
-	return clientAdapter, startup.Dependency{Name: "eHRMS", Status: "configured", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: "unified sync enabled; max_concurrency=1 request_interval=" + cfg.EHRMSRequestInterval.String()}, nil
+	return clientAdapter, startup.Dependency{
+		Name:   "eHRMS",
+		Status: "configured",
+		Target: startup.SafeURL(cfg.EHRMSBaseURL),
+		Detail: "unified sync enabled; max_concurrency=10 request_interval=0s",
+	}, nil
 }
 
-// configuredEHRMSSyncScheduler configures one ordered org-unit, employee, and attendance job.
+// configuredEHRMSSyncScheduler configures startup, daily-catalog, and half-hour attendance jobs.
 func configuredEHRMSSyncScheduler(cfg config.Config, hrService jobs.EHRMSSyncHRService, attendanceService jobs.EHRMSSyncAttendanceService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSSyncScheduler, jobs.EHRMSSyncOptions, startup.Dependency) {
 	opts := jobs.EHRMSSyncOptions{
-		Mode:      cfg.EHRMSSyncMode,
+		Mode:      jobs.ScheduledEHRMSSyncMode,
 		TenantID:  cfg.EHRMSSyncTenantID,
 		AccountID: cfg.EHRMSSyncAccountID,
 	}
@@ -887,15 +891,11 @@ func configuredEHRMSSyncScheduler(cfg config.Config, hrService jobs.EHRMSSyncHRS
 	if !ehrmsConfigured {
 		return nil, opts, startup.Dependency{Name: "eHRMS Sync Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}
 	}
-	mode := strings.TrimSpace(cfg.EHRMSSyncMode)
-	if mode == "" {
-		mode = "upsert"
-	}
 	return jobs.NewEHRMSSyncScheduler(hrService, attendanceService, logger), opts, startup.Dependency{
 		Name:   "eHRMS Sync Scheduler",
 		Status: "configured",
 		Target: "tenant=" + cfg.EHRMSSyncTenantID + " account=" + cfg.EHRMSSyncAccountID,
-		Detail: "schedule=startup,08:00,20:00 UTC+8 mode=" + mode,
+		Detail: "schedule=startup-full-year,daily-catalogs-08:00,attendance-leave-every-30m UTC+8 mode=" + jobs.ScheduledEHRMSSyncMode,
 	}
 }
 
@@ -970,7 +970,7 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			r.ehrmsSyncScheduler.Run(ctx, r.ehrmsSyncOptions)
 		}()
 		logger.Info("eHRMS sync scheduler started",
-			"schedule", "startup,08:00,20:00 UTC+8",
+			"schedule", "startup full-year; daily catalogs 08:00; attendance/leave every 30m UTC+8",
 			"mode", r.ehrmsSyncOptions.Mode,
 			"tenant_id", r.ehrmsSyncOptions.TenantID,
 			"account_id", r.ehrmsSyncOptions.AccountID,

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"nexus-pro-api/internal/domain"
@@ -16,12 +15,10 @@ import (
 
 // Client 定義 client 的資料結構。
 type Client struct {
-	baseURL         string
-	apiKey          string
-	httpClient      *http.Client
-	requestMu       sync.Mutex
-	requestInterval time.Duration
-	lastRequestAt   time.Time
+	baseURL      string
+	apiKey       string
+	httpClient   *http.Client
+	requestSlots chan struct{}
 }
 
 // RequestError 保留上游失敗分類，但不要求服務層暴露回應內容。
@@ -52,7 +49,7 @@ const maxAttendanceResponseBytes = 20 << 20
 const maxLeaveBalancesResponseBytes = 10 << 20
 const maxLeaveDetailsResponseBytes = 10 << 20
 const maxLeaveTypesResponseBytes = 5 << 20
-const defaultRequestInterval = time.Second
+const MaxConcurrentRequests = 10
 
 // NewClient 建立 client。
 func NewClient(baseURL string, apiKey string, httpClient *http.Client) (*Client, error) {
@@ -73,18 +70,12 @@ func NewClient(baseURL string, apiKey string, httpClient *http.Client) (*Client,
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Client{baseURL: baseURL, apiKey: apiKey, httpClient: httpClient, requestInterval: defaultRequestInterval}, nil
-}
-
-// WithRequestInterval serializes upstream calls and spaces their start times.
-func (c *Client) WithRequestInterval(interval time.Duration) *Client {
-	if c == nil {
-		return c
-	}
-	c.requestMu.Lock()
-	c.requestInterval = interval
-	c.requestMu.Unlock()
-	return c
+	return &Client{
+		baseURL:      baseURL,
+		apiKey:       apiKey,
+		httpClient:   httpClient,
+		requestSlots: make(chan struct{}, MaxConcurrentRequests),
+	}, nil
 }
 
 // Ping 檢查外部服務連線狀態。
@@ -162,7 +153,7 @@ func (c *Client) ListPositions(ctx context.Context) ([]domain.EHRMSPositionRecor
 
 // ListAttendance 列出考勤日彙總。
 func (c *Client) ListAttendance(ctx context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSAttendanceRecord, error) {
-	body, err := c.getJSON(ctx, ehrmsAttendanceQueryPath("/attendance", query), maxAttendanceResponseBytes, "attendance")
+	body, err := c.getJSON(ctx, ehrmsAttendanceQueryPath(query), maxAttendanceResponseBytes, "attendance")
 	if err != nil {
 		return nil, err
 	}
@@ -174,13 +165,17 @@ func (c *Client) ListAttendance(ctx context.Context, query domain.EHRMSAttendanc
 	for _, row := range raw {
 		rows = append(rows, domain.EHRMSAttendanceRecord(stringRecordFromJSON(row)))
 	}
-	return normalizeAttendanceRecords(rows), nil
+	rows = normalizeAttendanceRecords(rows)
+	if err := validateEmployeeScopedRows(rows, query.EmployeeID, "attendance"); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
-func ehrmsAttendanceQueryPath(path string, query domain.EHRMSAttendanceQuery) string {
+func ehrmsAttendanceQueryPath(query domain.EHRMSAttendanceQuery) string {
 	values := url.Values{}
 	if employeeID := strings.TrimSpace(query.EmployeeID); employeeID != "" {
-		values.Set("emp_id", employeeID)
+		values.Set("emp", employeeID)
 	}
 	if start := strings.TrimSpace(query.Start); start != "" {
 		values.Set("start", start)
@@ -188,27 +183,56 @@ func ehrmsAttendanceQueryPath(path string, query domain.EHRMSAttendanceQuery) st
 	if end := strings.TrimSpace(query.End); end != "" {
 		values.Set("end", end)
 	}
+	return ehrmsQueryPath("/attendance", values)
+}
+
+func ehrmsLeaveEntitlementQueryPath(query domain.EHRMSAttendanceQuery) string {
+	values := url.Values{}
+	if employeeID := strings.TrimSpace(query.EmployeeID); employeeID != "" {
+		values.Set("emp", employeeID)
+	}
+	return ehrmsQueryPath("/leave-entitlement", values)
+}
+
+func ehrmsLeaveQueryPath(query domain.EHRMSAttendanceQuery) string {
+	values := url.Values{}
+	if employeeID := strings.TrimSpace(query.EmployeeID); employeeID != "" {
+		values.Set("emp", employeeID)
+	}
+	if year := strings.TrimSpace(query.Year); year != "" {
+		values.Set("year", year)
+	}
+	return ehrmsQueryPath("/leave", values)
+}
+
+func ehrmsQueryPath(path string, values url.Values) string {
 	if encoded := values.Encode(); encoded != "" {
-		path += "?" + encoded
+		return path + "?" + encoded
 	}
 	return path
 }
 
-// ListLeaveBalances 列出假別餘額。
+// ListLeaveBalances 列出假別餘額（上游 GET /leave-entitlement）。
+// 上游回傳為員工年度 entitlement 巢狀結構；此處展平為服務層使用的 flat balance rows。
 func (c *Client) ListLeaveBalances(ctx context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveBalanceRecord, error) {
-	body, err := c.getJSON(ctx, ehrmsAttendanceQueryPath("/leave-balance", query), maxLeaveBalancesResponseBytes, "leave balances")
+	body, err := c.getJSON(ctx, ehrmsLeaveEntitlementQueryPath(query), maxLeaveBalancesResponseBytes, "leave entitlements")
 	if err != nil {
 		return nil, err
 	}
-	raw, err := decodeJSONObjectRows(body, "leave balances")
+	raw, err := decodeJSONObjectRows(body, "leave entitlements")
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]domain.EHRMSLeaveBalanceRecord, 0, len(raw))
-	for _, row := range raw {
+	flat := flattenLeaveEntitlementRows(raw)
+	rows := make([]domain.EHRMSLeaveBalanceRecord, 0, len(flat))
+	for _, row := range flat {
 		rows = append(rows, domain.EHRMSLeaveBalanceRecord(stringRecordFromJSON(row)))
 	}
-	return normalizeLeaveBalanceRecords(rows), nil
+	rows = normalizeLeaveBalanceRecords(rows)
+	if err := validateEmployeeScopedRows(rows, query.EmployeeID, "leave entitlements"); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func firstRecordValue(record map[string]string, keys ...string) string {
@@ -227,21 +251,40 @@ func firstRecordValue(record map[string]string, keys ...string) string {
 	return ""
 }
 
-// ListLeaveDetails 列出已休逐筆明細。
+// ListLeaveDetails 列出已休逐筆明細（上游 GET /leave）。
+// 上游回傳為假別聚合（含 balances/details）；此處只展平 details 供同步寫入 leave_records。
 func (c *Client) ListLeaveDetails(ctx context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveDetailRecord, error) {
-	body, err := c.getJSON(ctx, ehrmsAttendanceQueryPath("/leave-detail", query), maxLeaveDetailsResponseBytes, "leave details")
+	body, err := c.getJSON(ctx, ehrmsLeaveQueryPath(query), maxLeaveDetailsResponseBytes, "leave")
 	if err != nil {
 		return nil, err
 	}
-	raw, err := decodeJSONObjectRows(body, "leave details")
+	raw, err := decodeJSONObjectRows(body, "leave")
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]domain.EHRMSLeaveDetailRecord, 0, len(raw))
-	for _, row := range raw {
+	flat := flattenLeaveDetailRows(raw)
+	rows := make([]domain.EHRMSLeaveDetailRecord, 0, len(flat))
+	for _, row := range flat {
 		rows = append(rows, domain.EHRMSLeaveDetailRecord(stringRecordFromJSON(row)))
 	}
-	return normalizeLeaveDetailRecords(rows), nil
+	rows = normalizeLeaveDetailRecords(rows)
+	if err := validateEmployeeScopedRows(rows, query.EmployeeID, "leave"); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func validateEmployeeScopedRows[T ~map[string]string](rows []T, employeeID string, label string) error {
+	expected := strings.TrimSpace(employeeID)
+	if expected == "" {
+		return nil
+	}
+	for _, row := range rows {
+		if !strings.EqualFold(strings.TrimSpace(row["員工編號"]), expected) {
+			return fmt.Errorf("ehrms %s response included employee outside requested scope", label)
+		}
+	}
+	return nil
 }
 
 // ListLeaveTypes 列出假別目錄。
@@ -292,25 +335,15 @@ func (c *Client) getJSON(ctx context.Context, path string, maxBytes int, label s
 	return body, nil
 }
 
-// acquireRequestSlot limits the shared client to one in-flight upstream call and
-// ensures consecutive request starts are separated by the configured interval.
+// acquireRequestSlot limits the shared client to ten in-flight upstream calls.
+// Requests start as soon as a slot is available; no fixed interval is applied.
 func (c *Client) acquireRequestSlot(ctx context.Context) (func(), error) {
-	c.requestMu.Lock()
-	wait := c.requestInterval - time.Since(c.lastRequestAt)
-	if wait > 0 {
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			c.requestMu.Unlock()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
+	select {
+	case c.requestSlots <- struct{}{}:
+		return func() { <-c.requestSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	c.lastRequestAt = time.Now()
-	return c.requestMu.Unlock, nil
 }
 
 func decodeJSONObjectRows(body []byte, label string) ([]map[string]any, error) {

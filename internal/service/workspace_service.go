@@ -974,7 +974,7 @@ func (c WorkspaceService) visibleWorkspaceAttendanceEmployees(ctx RequestContext
 	if err != nil {
 		return nil, err
 	}
-	items, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	items, err := c.Service.listBusinessEmployees(ctx)
 	if err != nil {
 		return nil, err
 	}

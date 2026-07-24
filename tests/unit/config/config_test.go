@@ -196,19 +196,18 @@ func TestSFTPGoObjectStoreConfig(t *testing.T) {
 func TestEHRMSConfig(t *testing.T) {
 	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
 	t.Setenv("EHRMS_API_KEY", "test-key")
-	t.Setenv("EHRMS_REQUEST_INTERVAL", "750ms")
 	t.Setenv("EHRMS_SYNC_ENABLED", "true")
-	t.Setenv("EHRMS_SYNC_MODE", "upsert")
+	t.Setenv("EHRMS_SYNC_MODE", "create")
 	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
 	cfg, err := config.LoadE()
 	if err != nil {
 		t.Fatalf("expected eHRMS config to load, got %v", err)
 	}
-	if cfg.EHRMSBaseURL != "https://ehrms.example" || cfg.EHRMSAPIKey != "test-key" || cfg.EHRMSRequestInterval != 750*time.Millisecond {
+	if cfg.EHRMSBaseURL != "https://ehrms.example" || cfg.EHRMSAPIKey != "test-key" {
 		t.Fatalf("unexpected eHRMS config: %+v", cfg)
 	}
-	if !cfg.EHRMSSyncEnabled || cfg.EHRMSSyncMode != "upsert" || cfg.EHRMSSyncTenantID != "tenant-1" || cfg.EHRMSSyncAccountID != "acct-1" {
+	if !cfg.EHRMSSyncEnabled || cfg.EHRMSSyncTenantID != "tenant-1" || cfg.EHRMSSyncAccountID != "acct-1" {
 		t.Fatalf("unexpected eHRMS sync config: %+v", cfg)
 	}
 }
@@ -236,8 +235,8 @@ func TestEHRMSSyncConfigRequiresServiceActor(t *testing.T) {
 	}
 }
 
-// TestEHRMSSyncConfigValidatesMode validates the unified eHRMS sync mode.
-func TestEHRMSSyncConfigValidatesMode(t *testing.T) {
+// TestEHRMSSyncConfigIgnoresLegacyMode verifies the retired environment variable cannot override scheduled upsert.
+func TestEHRMSSyncConfigIgnoresLegacyMode(t *testing.T) {
 	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
 	t.Setenv("EHRMS_API_KEY", "test-key")
 	t.Setenv("EHRMS_SYNC_ENABLED", "true")
@@ -246,8 +245,8 @@ func TestEHRMSSyncConfigValidatesMode(t *testing.T) {
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
 
 	_, err := config.LoadE()
-	if err == nil || !strings.Contains(err.Error(), "EHRMS_SYNC_MODE must be create, update, or upsert") {
-		t.Fatalf("expected eHRMS sync mode error, got %v", err)
+	if err != nil {
+		t.Fatalf("legacy EHRMS_SYNC_MODE must be ignored, got %v", err)
 	}
 }
 

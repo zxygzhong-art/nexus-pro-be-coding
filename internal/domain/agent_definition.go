@@ -55,31 +55,31 @@ type LocalizedAgentSuggestedQuestion struct {
 
 // AgentModel 定義租戶模型設定。
 type AgentModel struct {
-	ID                 string               `json:"id"`
-	TenantID           string               `json:"tenant_id"`
-	Name               string               `json:"name"`
-	Provider           string               `json:"provider"`
-	ModelName          string               `json:"model_name"`
-	LiteLLMModel       string               `json:"litellm_model"`
-	APIBaseURL         string               `json:"api_base_url,omitempty"`
+	ID               string               `json:"id"`
+	TenantID         string               `json:"tenant_id"`
+	Name             string               `json:"name"`
+	Provider         string               `json:"provider"`
+	ModelName        string               `json:"model_name"`
+	LiteLLMModel     string               `json:"litellm_model"`
+	APIBaseURL       string               `json:"api_base_url,omitempty"`
 	APIKey           string               `json:"-"`
 	APIKeyCiphertext string               `json:"-"`
 	APIKeySet        bool                 `json:"api_key_set"`
-	APIKeyPreview      string               `json:"api_key_preview,omitempty"`
-	RateLimitRPM       int                  `json:"rate_limit_rpm"`
-	Status             AgentModelStatus     `json:"status"`
-	TimeoutSeconds     int                  `json:"timeout_seconds"`
-	MonthlyQuota       int64                `json:"monthly_quota"`
-	UsedQuota          int64                `json:"used_quota"`
-	LastTestedAt       *time.Time           `json:"last_tested_at,omitempty"`
-	LastTestStatus     string               `json:"last_test_status"`
-	LastTestMessage    string               `json:"last_test_message,omitempty"`
-	SyncStatus         AgentModelSyncStatus `json:"sync_status"`
-	LastSyncedAt       *time.Time           `json:"last_synced_at,omitempty"`
-	LastSyncError      string               `json:"last_sync_error,omitempty"`
-	SyncedConfigHash   string               `json:"synced_config_hash,omitempty"`
-	CreatedAt          time.Time            `json:"created_at"`
-	UpdatedAt          time.Time            `json:"updated_at"`
+	APIKeyPreview    string               `json:"api_key_preview,omitempty"`
+	RateLimitRPM     int                  `json:"rate_limit_rpm"`
+	Status           AgentModelStatus     `json:"status"`
+	TimeoutSeconds   int                  `json:"timeout_seconds"`
+	MonthlyQuota     int64                `json:"monthly_quota"`
+	UsedQuota        int64                `json:"used_quota"`
+	LastTestedAt     *time.Time           `json:"last_tested_at,omitempty"`
+	LastTestStatus   string               `json:"last_test_status"`
+	LastTestMessage  string               `json:"last_test_message,omitempty"`
+	SyncStatus       AgentModelSyncStatus `json:"sync_status"`
+	LastSyncedAt     *time.Time           `json:"last_synced_at,omitempty"`
+	LastSyncError    string               `json:"last_sync_error,omitempty"`
+	SyncedConfigHash string               `json:"synced_config_hash,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
 }
 
 // AgentDefinitionVersion 定義 Agent 版本快照。
@@ -300,6 +300,7 @@ type UpdateAgentDefinitionInput struct {
 	Visibility                    *string                           `json:"visibility"`
 	VisibilityTargets             []string                          `json:"visibility_targets"`
 	TimeoutSeconds                *int                              `json:"timeout_seconds"`
+	ExpectedVersion               *int                              `json:"expected_version"`
 	VersionNote                   string                            `json:"version_note"`
 }
 

@@ -98,7 +98,6 @@ type (
 	PlatformFormItem                   = domain.PlatformFormItem
 	PlatformFormColumn                 = domain.PlatformFormColumn
 	PlatformClockSummary               = domain.PlatformClockSummary
-	PlatformHomeResponse               = domain.PlatformHomeResponse
 	PlatformChatMessage                = domain.PlatformChatMessage
 	PlatformAssistantsResponse         = domain.PlatformAssistantsResponse
 	PlatformFormApplication            = domain.PlatformFormApplication

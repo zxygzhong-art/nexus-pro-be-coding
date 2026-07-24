@@ -77,6 +77,18 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	if agent.Status != domain.AgentDefinitionStatusDraft || agent.Version != 2 {
 		t.Fatalf("expected draft version 2 after config update, got %+v", agent)
 	}
+	staleVersion := 1
+	staleDescription := "stale editor update"
+	if _, staleErr := agentservice.New(svc).UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
+		Description:     &staleDescription,
+		ExpectedVersion: &staleVersion,
+	}); staleErr == nil {
+		t.Fatal("expected stale agent version conflict")
+	} else if appErr, ok := domain.AsAppError(staleErr); !ok ||
+		appErr.Status != 409 ||
+		appErr.ReasonCode != "agent_definition_version_conflict" {
+		t.Fatalf("expected stable agent version conflict, got %v", staleErr)
+	}
 	agent, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +100,15 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || len(listed[0].Versions) != 2 {
-		t.Fatalf("expected list response to include stored version history, got %+v", listed)
+	if len(listed) != 1 || len(listed[0].Versions) != 0 {
+		t.Fatalf("expected list response to omit version history, got %+v", listed)
+	}
+	detail, err := agentservice.New(svc).GetDefinition(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Versions) != 2 {
+		t.Fatalf("expected detail response to include stored version history, got %+v", detail)
 	}
 
 	trial, err := agentservice.New(svc).Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "How do I request leave?"})

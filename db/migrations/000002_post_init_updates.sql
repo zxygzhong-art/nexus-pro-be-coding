@@ -525,6 +525,8 @@ CREATE TABLE employees (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_no text NOT NULL DEFAULT '',
+    external_source text NOT NULL DEFAULT '',
+    external_employee_id text NOT NULL DEFAULT '',
     name text NOT NULL,
     company_email text NOT NULL DEFAULT '',
     personal_email text NOT NULL DEFAULT '',
@@ -546,6 +548,9 @@ CREATE TABLE employees (
     contact_info jsonb NOT NULL DEFAULT '{}'::jsonb,
     insurance_info jsonb NOT NULL DEFAULT '{}'::jsonb,
     internal_experiences jsonb NOT NULL DEFAULT '[]'::jsonb,
+    source_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source_updated_at timestamptz,
+    last_synced_at timestamptz,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT employees_tenant_id_id_idx UNIQUE (tenant_id, id),
@@ -613,6 +618,7 @@ CREATE INDEX employees_keyword_trgm_idx ON employees USING gin (
     ) gin_trgm_ops
 );
 CREATE UNIQUE INDEX employees_tenant_employee_no_idx ON employees (tenant_id, employee_no) WHERE employee_no <> '';
+CREATE UNIQUE INDEX employees_tenant_external_identity_idx ON employees (tenant_id, external_source, external_employee_id) WHERE external_source <> '' AND external_employee_id <> '';
 CREATE UNIQUE INDEX employees_tenant_account_id_idx ON employees (tenant_id, account_id) WHERE account_id <> '';
 CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, lower(company_email)) WHERE company_email <> '';
 CREATE UNIQUE INDEX employees_tenant_personal_email_idx ON employees (tenant_id, lower(personal_email)) WHERE personal_email <> '';
@@ -700,10 +706,12 @@ CREATE TABLE leave_balances (
     used_minutes integer NOT NULL DEFAULT 0,
     remaining_minutes integer NOT NULL DEFAULT 0,
     source text NOT NULL CHECK (source IN ('nexus', 'ehrms')),
+    source_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source_updated_at timestamptz,
     last_synced_at timestamptz,
     updated_at timestamptz NOT NULL,
     CONSTRAINT leave_balances_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT leave_balances_nonnegative_check CHECK (remaining_minutes >= 0 AND granted_minutes >= 0 AND used_minutes >= 0),
+    CONSTRAINT leave_balances_nonnegative_check CHECK (granted_minutes >= 0 AND used_minutes >= 0),
     CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
     CONSTRAINT leave_balances_leave_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
     CONSTRAINT leave_balances_tenant_identity_idx UNIQUE (tenant_id, id, employee_id, leave_type_id, entitlement_year),
@@ -723,6 +731,8 @@ COMMENT ON COLUMN leave_balances.granted_minutes IS '年度授予分钟数';
 COMMENT ON COLUMN leave_balances.used_minutes IS '上游已使用分钟数';
 COMMENT ON COLUMN leave_balances.remaining_minutes IS '余额快照剩余分钟数';
 COMMENT ON COLUMN leave_balances.source IS '余额来源：nexus / ehrms';
+COMMENT ON COLUMN leave_balances.source_payload IS '最近一次上游额度原始字段快照';
+COMMENT ON COLUMN leave_balances.source_updated_at IS '上游额度记录更新时间';
 COMMENT ON COLUMN leave_balances.last_synced_at IS '最近同步时间；Nexus 本地余额可为空';
 COMMENT ON COLUMN leave_balances.updated_at IS '更新时间';
 
@@ -979,9 +989,10 @@ CREATE TABLE leave_records (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
     leave_type_id text NOT NULL,
-    balance_id text NOT NULL,
+    balance_id text,
     entitlement_year integer NOT NULL CHECK (entitlement_year >= 2000),
     source text NOT NULL CHECK (source IN ('nexus', 'ehrms')),
+    external_ref text NOT NULL DEFAULT '',
     event_date timestamptz NOT NULL,
     start_at timestamptz NOT NULL,
     end_at timestamptz NOT NULL,
@@ -992,13 +1003,18 @@ CREATE TABLE leave_records (
     reconciliation_status text NOT NULL DEFAULT 'unmatched' CHECK (
         reconciliation_status IN ('unmatched', 'matched', 'mismatch', 'ambiguous', 'not_required')
     ),
+    balance_match_status text NOT NULL DEFAULT 'matched' CHECK (
+        balance_match_status IN ('matched', 'unmatched')
+    ),
+    balance_match_reason text NOT NULL DEFAULT '',
+    source_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source_updated_at timestamptz,
     last_seen_at timestamptz,
     deleted_at timestamptz,
     updated_at timestamptz NOT NULL,
     CONSTRAINT leave_records_interval_check CHECK (end_at > start_at),
     CONSTRAINT leave_records_year_check CHECK (
         EXTRACT(YEAR FROM start_at AT TIME ZONE 'Asia/Shanghai')::integer = entitlement_year
-        AND EXTRACT(YEAR FROM (end_at - interval '1 microsecond') AT TIME ZONE 'Asia/Shanghai')::integer = entitlement_year
     ),
     CONSTRAINT leave_records_match_shape_check CHECK (
         (source = 'nexus' AND matched_record_id IS NULL)
@@ -1020,6 +1036,9 @@ CREATE INDEX leave_records_balance_idx ON leave_records (tenant_id, balance_id, 
 CREATE UNIQUE INDEX leave_records_ehrms_match_idx
 ON leave_records (tenant_id, matched_record_id)
 WHERE source = 'ehrms' AND matched_record_id IS NOT NULL;
+CREATE UNIQUE INDEX leave_records_tenant_source_external_ref_idx
+ON leave_records (tenant_id, source, external_ref)
+WHERE external_ref <> '';
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION enforce_leave_record_match_source()
@@ -1053,9 +1072,10 @@ COMMENT ON COLUMN leave_records.id IS '休假记录主键；Nexus 记录与 leav
 COMMENT ON COLUMN leave_records.tenant_id IS '租户 ID';
 COMMENT ON COLUMN leave_records.employee_id IS '员工 ID';
 COMMENT ON COLUMN leave_records.leave_type_id IS '假别代码；Nexus 与 eHRMS 使用同一套代码';
-COMMENT ON COLUMN leave_records.balance_id IS '本记录唯一对应的年度余额 ID';
-COMMENT ON COLUMN leave_records.entitlement_year IS '额度所属年度；记录不得跨年度';
+COMMENT ON COLUMN leave_records.balance_id IS '匹配到的年度余额 ID；EHRMS 明细允许暂时为空';
+COMMENT ON COLUMN leave_records.entitlement_year IS '额度所属年度；未匹配余额时取开始日期年度';
 COMMENT ON COLUMN leave_records.source IS '记录来源：nexus / ehrms';
+COMMENT ON COLUMN leave_records.external_ref IS '上游请假明细稳定标识';
 COMMENT ON COLUMN leave_records.event_date IS '来源记录创建时间';
 COMMENT ON COLUMN leave_records.start_at IS '请假开始时间';
 COMMENT ON COLUMN leave_records.end_at IS '请假结束时间';
@@ -1064,6 +1084,10 @@ COMMENT ON COLUMN leave_records.remark IS '请假说明';
 COMMENT ON COLUMN leave_records.status IS '记录状态：pending / active / cancelled / corrected';
 COMMENT ON COLUMN leave_records.matched_record_id IS '一对一匹配的 Nexus 记录 ID；仅 eHRMS 记录填写';
 COMMENT ON COLUMN leave_records.reconciliation_status IS '双来源核对状态';
+COMMENT ON COLUMN leave_records.balance_match_status IS '年度余额关联状态：matched / unmatched';
+COMMENT ON COLUMN leave_records.balance_match_reason IS '未匹配年度余额的机器可读原因';
+COMMENT ON COLUMN leave_records.source_payload IS '最近一次上游请假明细原始字段快照';
+COMMENT ON COLUMN leave_records.source_updated_at IS '上游请假明细记录更新时间';
 COMMENT ON COLUMN leave_records.last_seen_at IS 'eHRMS 最近同步看到该记录的时间';
 COMMENT ON COLUMN leave_records.deleted_at IS 'eHRMS 记录被上游移除的时间';
 COMMENT ON COLUMN leave_records.updated_at IS '更新时间';
@@ -1178,29 +1202,124 @@ CREATE INDEX attendance_clock_records_effective_boundary_idx ON attendance_clock
 CREATE INDEX attendance_clock_records_effective_latest_idx ON attendance_clock_records (tenant_id, employee_id, work_date, clocked_at, created_at, id) WHERE record_status = 'accepted' AND voided = false;
 CREATE UNIQUE INDEX attendance_clock_records_client_event_idx ON attendance_clock_records (tenant_id, client_event_id) WHERE client_event_id <> '';
 
-CREATE TABLE attendance_daily_summaries (
+CREATE TABLE attendance_daily_records (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
     work_date date NOT NULL,
-    shift_start text NOT NULL DEFAULT '',
-    shift_end text NOT NULL DEFAULT '',
-    shift_hours double precision NOT NULL DEFAULT 0,
-    daily_hours double precision NOT NULL DEFAULT 0,
-    clock_hours double precision NOT NULL DEFAULT 0,
-    clock_start text NOT NULL DEFAULT '',
-    clock_end text NOT NULL DEFAULT '',
-    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-    source text NOT NULL DEFAULT 'manual',
+    source text NOT NULL CHECK (source IN ('local', 'ehrms')),
+    scheduled_start_at timestamptz,
+    scheduled_end_at timestamptz,
+    scheduled_minutes integer NOT NULL DEFAULT 0 CHECK (scheduled_minutes >= 0),
+    required_minutes integer NOT NULL DEFAULT 0 CHECK (required_minutes >= 0),
+    worked_minutes integer NOT NULL DEFAULT 0 CHECK (worked_minutes >= 0),
+    credited_leave_minutes integer NOT NULL DEFAULT 0 CHECK (credited_leave_minutes >= 0),
+    overtime_minutes integer NOT NULL DEFAULT 0 CHECK (overtime_minutes >= 0),
+    clock_in_at timestamptz,
+    clock_out_at timestamptz,
+    clock_in_record_id text,
+    clock_out_record_id text,
+    punch_count integer NOT NULL DEFAULT 0 CHECK (punch_count >= 0),
+    day_status text NOT NULL DEFAULT '',
+    anomaly_reasons text[] NOT NULL DEFAULT '{}'::text[],
+    input_fingerprint text NOT NULL CHECK (btrim(input_fingerprint) <> ''),
     external_ref text NOT NULL DEFAULT '',
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, employee_id, work_date, source),
+    CONSTRAINT attendance_daily_records_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT attendance_daily_records_clock_in_fk FOREIGN KEY (tenant_id, clock_in_record_id, employee_id) REFERENCES attendance_clock_records (tenant_id, id, employee_id),
+    CONSTRAINT attendance_daily_records_clock_out_fk FOREIGN KEY (tenant_id, clock_out_record_id, employee_id) REFERENCES attendance_clock_records (tenant_id, id, employee_id),
+    CONSTRAINT attendance_daily_records_schedule_check CHECK (
+        scheduled_start_at IS NULL OR scheduled_end_at IS NULL OR scheduled_end_at > scheduled_start_at
+    ),
+    CONSTRAINT attendance_daily_records_clock_check CHECK (
+        clock_in_at IS NULL OR clock_out_at IS NULL OR clock_out_at >= clock_in_at
+    )
+);
+
+CREATE INDEX attendance_daily_records_tenant_source_date_idx
+ON attendance_daily_records (tenant_id, source, work_date DESC, employee_id);
+
+CREATE UNIQUE INDEX attendance_daily_records_external_ref_idx
+ON attendance_daily_records (tenant_id, external_ref)
+WHERE source = 'ehrms' AND external_ref <> '';
+
+CREATE TABLE attendance_daily_leave_segments (
+    tenant_id text NOT NULL,
+    employee_id text NOT NULL,
+    work_date date NOT NULL,
+    daily_source text NOT NULL DEFAULT 'ehrms' CHECK (daily_source = 'ehrms'),
+    segment_no smallint NOT NULL CHECK (segment_no > 0),
+    leave_type_id text,
+    source_leave_type text NOT NULL DEFAULT '',
+    start_at timestamptz,
+    end_at timestamptz,
+    minutes integer NOT NULL DEFAULT 0 CHECK (minutes >= 0),
+    counted boolean NOT NULL DEFAULT false,
+    time_inferred boolean NOT NULL DEFAULT false,
+    leave_record_id text,
+    link_status text NOT NULL DEFAULT 'unmatched' CHECK (
+        link_status IN ('unmatched', 'matched', 'mismatch', 'ambiguous')
+    ),
+    match_basis text NOT NULL DEFAULT '',
+    candidate_record_ids text[] NOT NULL DEFAULT '{}'::text[],
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, employee_id, work_date, daily_source, segment_no),
+    CONSTRAINT attendance_daily_leave_segments_daily_record_fk FOREIGN KEY (
+        tenant_id, employee_id, work_date, daily_source
+    ) REFERENCES attendance_daily_records (tenant_id, employee_id, work_date, source) ON DELETE CASCADE,
+    CONSTRAINT attendance_daily_leave_segments_type_fk FOREIGN KEY (
+        tenant_id, leave_type_id
+    ) REFERENCES leave_types (tenant_id, id),
+    CONSTRAINT attendance_daily_leave_segments_record_fk FOREIGN KEY (
+        tenant_id, leave_record_id
+    ) REFERENCES leave_records (tenant_id, id),
+    CONSTRAINT attendance_daily_leave_segments_interval_check CHECK (
+        start_at IS NULL OR end_at IS NULL OR end_at > start_at
+    ),
+    CONSTRAINT attendance_daily_leave_segments_match_check CHECK (
+        (link_status = 'matched' AND leave_record_id IS NOT NULL)
+        OR (link_status <> 'matched' AND leave_record_id IS NULL)
+    )
+);
+
+CREATE INDEX attendance_daily_leave_segments_record_idx
+ON attendance_daily_leave_segments (tenant_id, leave_record_id)
+WHERE leave_record_id IS NOT NULL;
+
+CREATE INDEX attendance_daily_leave_segments_unmatched_idx
+ON attendance_daily_leave_segments (tenant_id, link_status, work_date, employee_id)
+WHERE link_status <> 'matched';
+
+CREATE TABLE attendance_daily_reconciliations (
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    work_date date NOT NULL,
+    local_fingerprint text NOT NULL DEFAULT '',
+    ehrms_fingerprint text NOT NULL DEFAULT '',
+    status text NOT NULL CHECK (status IN ('matched', 'mismatch', 'local_only', 'ehrms_only')),
+    differences jsonb NOT NULL DEFAULT '{}'::jsonb,
+    resolution_status text NOT NULL DEFAULT 'unresolved' CHECK (
+        resolution_status IN ('unresolved', 'accepted_local', 'accepted_ehrms', 'ignored')
+    ),
+    resolved_by_account_id text,
+    resolved_at timestamptz,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     PRIMARY KEY (tenant_id, employee_id, work_date),
-    CONSTRAINT attendance_daily_summaries_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+    CONSTRAINT attendance_daily_reconciliations_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT attendance_daily_reconciliations_resolver_fk FOREIGN KEY (tenant_id, resolved_by_account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT attendance_daily_reconciliations_resolution_check CHECK (
+        (resolution_status = 'unresolved' AND resolved_by_account_id IS NULL AND resolved_at IS NULL)
+        OR (resolution_status <> 'unresolved' AND resolved_by_account_id IS NOT NULL AND resolved_at IS NOT NULL)
+    )
 );
 
-CREATE INDEX attendance_daily_summaries_tenant_employee_date_idx ON attendance_daily_summaries (tenant_id, employee_id, work_date DESC);
-CREATE INDEX attendance_daily_summaries_tenant_source_date_idx ON attendance_daily_summaries (tenant_id, source, work_date DESC);
-CREATE UNIQUE INDEX attendance_daily_summaries_external_ref_idx ON attendance_daily_summaries (tenant_id, external_ref) WHERE external_ref <> '';
+CREATE INDEX attendance_daily_reconciliations_status_idx
+ON attendance_daily_reconciliations (tenant_id, status, work_date DESC, employee_id);
 
 CREATE TABLE attendance_day_projections (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1249,6 +1368,13 @@ ALTER TABLE attendance_clock_records
     ADD CONSTRAINT attendance_clock_records_voided_by_fk
     FOREIGN KEY (tenant_id, voided_by_account_id)
     REFERENCES accounts (tenant_id, id);
+
+ALTER TABLE leave_balance_entries
+    ADD CONSTRAINT leave_balance_entries_overtime_request_fk
+    FOREIGN KEY (tenant_id, overtime_request_id, employee_id)
+    REFERENCES form_business_records (tenant_id, id, subject_employee_id);
+
+CREATE INDEX leave_balance_entries_overtime_request_idx ON leave_balance_entries (tenant_id, overtime_request_id) WHERE overtime_request_id IS NOT NULL;
 
 CREATE TABLE platform_task_items (
     id text PRIMARY KEY,
@@ -2040,8 +2166,12 @@ ALTER TABLE attendance_worksites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_worksites FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records FORCE ROW LEVEL SECURITY;
-ALTER TABLE attendance_daily_summaries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE attendance_daily_summaries FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_records FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_leave_segments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_leave_segments FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_reconciliations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_reconciliations FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_day_projections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_day_projections FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_items ENABLE ROW LEVEL SECURITY;
@@ -2152,7 +2282,9 @@ CREATE POLICY tenant_isolation_form_business_records ON form_business_records US
 CREATE POLICY tenant_isolation_leave_records ON leave_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_worksites ON attendance_worksites USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_attendance_daily_summaries ON attendance_daily_summaries USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_daily_records ON attendance_daily_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_daily_leave_segments ON attendance_daily_leave_segments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_daily_reconciliations ON attendance_daily_reconciliations USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_day_projections ON attendance_day_projections USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

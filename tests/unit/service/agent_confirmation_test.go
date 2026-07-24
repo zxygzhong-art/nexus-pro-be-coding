@@ -121,6 +121,63 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	}
 }
 
+func TestAgentEmployeeLifecycleChangeRequiresConfirmation(t *testing.T) {
+	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentConfirmationAccount(t, store, now, "acct-hr", []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+		{Resource: "agent.run", Action: "read", Scope: "all"},
+		agentToolTestPermission("employee_lifecycle_change"),
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+		{Resource: "hr.employee", Action: "status_transition", Scope: "all"},
+	})
+	target := domain.Employee{
+		ID: "emp-target", TenantID: "tenant-1", Name: "Target",
+		Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.UpsertEmployee(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+
+	var confirmation *domain.AgentConfirmation
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, _ service.AgentChatEmitFunc) error {
+		result, err := req.Tools["employee_lifecycle_change"](ctx, map[string]any{
+			"employee_id": "emp-target", "status": "leave_suspended", "reason": "approved leave of absence",
+			"start_date": "2026-08-01", "end_date": "2026-08-31",
+		})
+		if err != nil {
+			return err
+		}
+		confirmation, _ = result["confirmation"].(*domain.AgentConfirmation)
+		return nil
+	}}
+	confirmationStore := newAgentConfirmationTestStore(store)
+	svc := service.New(confirmationStore, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-hr"}
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "將員工留職停薪"}, func(context.Context, domain.AgentChatEvent) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != string(domain.AgentRunStatusCompleted) || confirmation == nil || confirmation.Kind != "internal_tool_action" {
+		t.Fatalf("expected internal action confirmation, run=%+v confirmation=%+v", run, confirmation)
+	}
+	before, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-target")
+	if err != nil || !ok || before.EmploymentStatus != "active" {
+		t.Fatalf("employee must remain active before confirmation, employee=%+v ok=%v err=%v", before, ok, err)
+	}
+	execution, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Status != "completed" {
+		t.Fatalf("expected completed confirmation, got %+v", execution)
+	}
+	after, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-target")
+	if err != nil || !ok || after.EmploymentStatus != "leave_suspended" {
+		t.Fatalf("expected confirmed lifecycle transition, employee=%+v ok=%v err=%v", after, ok, err)
+	}
+}
+
 // TestAgentLeaveDraftDefaultsMissingTimes verifies leave drafts use today's configured work period when both times are absent.
 func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	now := time.Date(2026, 7, 14, 2, 30, 0, 0, time.UTC)

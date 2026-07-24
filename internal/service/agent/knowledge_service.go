@@ -1,19 +1,15 @@
 package agent
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/ledongthuc/pdf"
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/utils"
@@ -713,22 +709,11 @@ func normalizeKnowledgeUpload(input domain.UploadKnowledgeDocumentInput) (normal
 	if extension == ".pdf" {
 		sourceType = "pdf"
 		contentType = "application/pdf"
-		reader, err := pdf.NewReader(bytes.NewReader(input.Content), int64(len(input.Content)))
+		extractedContent, err := extractKnowledgePDFText(input.Content)
 		if err != nil {
-			return normalizedKnowledgeUpload{}, BadRequest("PDF file could not be parsed")
+			return normalizedKnowledgeUpload{}, BadRequest(err.Error())
 		}
-		plainText, err := reader.GetPlainText()
-		if err != nil {
-			return normalizedKnowledgeUpload{}, BadRequest("PDF text could not be extracted")
-		}
-		data, err := io.ReadAll(io.LimitReader(plainText, int64(knowledgeUploadMaxRunes*4+1)))
-		if err != nil {
-			return normalizedKnowledgeUpload{}, BadRequest("PDF text could not be extracted")
-		}
-		content = strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
-		if content == "" {
-			return normalizedKnowledgeUpload{}, BadRequest("PDF contains no extractable text; scanned PDFs require OCR")
-		}
+		content = extractedContent
 	} else {
 		if _, ok := knowledgeTextExtensions[extension]; !ok {
 			return normalizedKnowledgeUpload{}, BadRequest("knowledge source type is not supported")

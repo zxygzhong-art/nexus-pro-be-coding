@@ -1,8 +1,11 @@
 package jobs_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,8 +21,9 @@ func TestEHRMSSyncSchedulerRunsOrderedUnifiedSync(t *testing.T) {
 		employeeResult: domain.EHRMSEmployeeSyncResponse{Fetched: 2, Created: 1, Updated: 1, Mode: "upsert"},
 	}
 	attendanceService := &recordingEHRMSSyncAttendanceService{
-		order:  &order,
-		result: domain.EHRMSAttendanceSyncResponse{Fetched: 2, Created: 1, Updated: 1, Mode: "upsert"},
+		order:           &order,
+		leaveTypeResult: domain.EHRMSLeaveTypeSyncResponse{Fetched: 3, Upserted: 3},
+		result:          domain.EHRMSAttendanceSyncResponse{Fetched: 2, Created: 1, Updated: 1, Mode: "upsert"},
 	}
 	scheduler := jobs.NewEHRMSSyncScheduler(hrService, attendanceService, nil)
 
@@ -31,10 +35,10 @@ func TestEHRMSSyncSchedulerRunsOrderedUnifiedSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.OrgUnits.Upserted != 2 || result.Employees.Fetched != 2 || result.Attendance.Fetched != 2 {
+	if result.OrgUnits.Upserted != 2 || result.Employees.Fetched != 2 || result.LeaveTypes.Upserted != 3 || result.Attendance.Fetched != 2 {
 		t.Fatalf("unexpected unified result: %+v", result)
 	}
-	wantOrder := []string{"org_units", "employees", "attendance"}
+	wantOrder := []string{"org_units", "employees", "leave_types", "attendance"}
 	if len(order) != len(wantOrder) {
 		t.Fatalf("unexpected sync order: %v", order)
 	}
@@ -49,8 +53,49 @@ func TestEHRMSSyncSchedulerRunsOrderedUnifiedSync(t *testing.T) {
 	if hrService.ctx.RequestID == "" || hrService.ctx.TraceID != hrService.ctx.RequestID {
 		t.Fatalf("expected scheduled request/trace id, got %+v", hrService.ctx)
 	}
-	if hrService.employeeInput.Mode != "upsert" || attendanceService.input.Mode != "upsert" {
+	if hrService.employeeInput.Mode != "upsert" || attendanceService.input.Mode != "upsert" ||
+		attendanceService.input.Start == "" || attendanceService.input.End == "" || !attendanceService.input.SkipLeaveTypes {
 		t.Fatalf("unexpected sync inputs: employee=%+v attendance=%+v", hrService.employeeInput, attendanceService.input)
+	}
+}
+
+func TestEHRMSSyncSchedulerLogsStageStatus(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	scheduler := jobs.NewEHRMSSyncScheduler(
+		&recordingEHRMSSyncHRService{
+			orgResult:      domain.EHRMSOrgUnitSyncResponse{Fetched: 2, Upserted: 2},
+			employeeResult: domain.EHRMSEmployeeSyncResponse{Fetched: 3, Updated: 3, Mode: "upsert"},
+		},
+		&recordingEHRMSSyncAttendanceService{
+			result: domain.EHRMSAttendanceSyncResponse{Fetched: 4, Created: 4, Mode: "upsert"},
+		},
+		logger,
+	)
+
+	if _, err := scheduler.SyncOnce(context.Background(), jobs.EHRMSSyncOptions{
+		TenantID: "tenant-1", AccountID: "acct-1", Mode: "upsert",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logs := output.String()
+	for _, expected := range []string{
+		"msg=\"eHRMS sync started\"",
+		"msg=\"eHRMS sync stages completed\"",
+		"stage=org_units_positions",
+		"stage=employees",
+		"stage=leave_types",
+		"stage=attendance_leave",
+	} {
+		if !strings.Contains(logs, expected) {
+			t.Fatalf("missing sync status log %q in:\n%s", expected, logs)
+		}
+	}
+	if got := strings.Count(logs, "msg=\"eHRMS sync stage started\""); got != 4 {
+		t.Fatalf("sync stage started logs = %d, want 4:\n%s", got, logs)
+	}
+	if got := strings.Count(logs, "msg=\"eHRMS sync stage completed\""); got != 4 {
+		t.Fatalf("sync stage completed logs = %d, want 4:\n%s", got, logs)
 	}
 }
 
@@ -82,21 +127,67 @@ func TestEHRMSSyncSchedulerStopsAfterFailedStep(t *testing.T) {
 	}
 }
 
-func TestEHRMSSyncSchedulerRunsOnceOnStartup(t *testing.T) {
-	callCh := make(chan string, 3)
+func TestEHRMSSyncSchedulerSeparatesDailyCatalogsAndTodayData(t *testing.T) {
+	order := []string{}
+	attendanceService := &recordingEHRMSSyncAttendanceService{order: &order}
 	scheduler := jobs.NewEHRMSSyncScheduler(
-		&recordingEHRMSSyncHRService{callCh: callCh},
-		&recordingEHRMSSyncAttendanceService{callCh: callCh},
+		&recordingEHRMSSyncHRService{order: &order},
+		attendanceService,
+		nil,
+	)
+	opts := jobs.EHRMSSyncOptions{TenantID: "tenant-1", AccountID: "acct-1", Mode: "upsert"}
+
+	if _, err := scheduler.SyncDailyCatalogs(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "org_units,employees,leave_types" {
+		t.Fatalf("daily catalog order = %q", got)
+	}
+	if attendanceService.input.Start != "" || attendanceService.input.End != "" {
+		t.Fatalf("daily catalog sync must not call attendance: %+v", attendanceService.input)
+	}
+
+	order = nil
+	result, err := scheduler.SyncToday(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "attendance" {
+		t.Fatalf("30-minute sync order = %q", got)
+	}
+	start, err := time.Parse(time.DateOnly, attendanceService.input.Start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := time.Parse(time.DateOnly, attendanceService.input.End)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !end.Equal(start.AddDate(0, 0, 1)) || !attendanceService.input.SkipLeaveTypes {
+		t.Fatalf("expected one-day attendance-only bounds, input=%+v", attendanceService.input)
+	}
+	if result.LeaveTypesFetched != 0 {
+		t.Fatalf("30-minute sync must not refresh leave types: %+v", result)
+	}
+}
+
+func TestEHRMSSyncSchedulerRunsOnceOnStartup(t *testing.T) {
+	callCh := make(chan string, 4)
+	hrService := &recordingEHRMSSyncHRService{callCh: callCh}
+	attendanceService := &recordingEHRMSSyncAttendanceService{callCh: callCh}
+	scheduler := jobs.NewEHRMSSyncScheduler(
+		hrService,
+		attendanceService,
 		nil,
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		scheduler.Run(ctx, jobs.EHRMSSyncOptions{TenantID: "tenant-1", AccountID: "acct-1"})
+		scheduler.Run(ctx, jobs.EHRMSSyncOptions{TenantID: "tenant-1", AccountID: "acct-1", Mode: "create"})
 	}()
 
-	for _, want := range []string{"org_units", "employees", "attendance"} {
+	for _, want := range []string{"org_units", "employees", "leave_types", "attendance"} {
 		select {
 		case got := <-callCh:
 			if got != want {
@@ -111,6 +202,10 @@ func TestEHRMSSyncSchedulerRunsOnceOnStartup(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("scheduler did not stop after cancellation")
+	}
+	if hrService.employeeInput.Mode != jobs.ScheduledEHRMSSyncMode ||
+		attendanceService.input.Mode != jobs.ScheduledEHRMSSyncMode {
+		t.Fatalf("scheduled mode must stay upsert, employee=%q attendance=%q", hrService.employeeInput.Mode, attendanceService.input.Mode)
 	}
 }
 
@@ -149,12 +244,25 @@ func (s *recordingEHRMSSyncHRService) SyncEHRMSEmployees(ctx domain.RequestConte
 }
 
 type recordingEHRMSSyncAttendanceService struct {
-	order  *[]string
-	ctx    domain.RequestContext
-	input  domain.EHRMSAttendanceSyncInput
-	result domain.EHRMSAttendanceSyncResponse
-	err    error
-	callCh chan string
+	order           *[]string
+	ctx             domain.RequestContext
+	input           domain.EHRMSAttendanceSyncInput
+	leaveTypeResult domain.EHRMSLeaveTypeSyncResponse
+	result          domain.EHRMSAttendanceSyncResponse
+	leaveTypeErr    error
+	err             error
+	callCh          chan string
+}
+
+func (s *recordingEHRMSSyncAttendanceService) SyncEHRMSLeaveTypes(ctx domain.RequestContext) (domain.EHRMSLeaveTypeSyncResponse, error) {
+	s.ctx = ctx
+	if s.order != nil {
+		*s.order = append(*s.order, "leave_types")
+	}
+	if s.callCh != nil {
+		s.callCh <- "leave_types"
+	}
+	return s.leaveTypeResult, s.leaveTypeErr
 }
 
 func (s *recordingEHRMSSyncAttendanceService) SyncEHRMSAttendance(ctx domain.RequestContext, input domain.EHRMSAttendanceSyncInput) (domain.EHRMSAttendanceSyncResponse, error) {

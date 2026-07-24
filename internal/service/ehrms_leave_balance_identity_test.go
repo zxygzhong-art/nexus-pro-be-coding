@@ -33,3 +33,14 @@ func TestEHRMSLeaveBalanceStableIDUsesEmployeeTypeAndYear(t *testing.T) {
 		})
 	}
 }
+
+func TestEHRMSEmployeeStableIDIsTenantScoped(t *testing.T) {
+	tenantA := ehrmsEmployeeStableID("tenant-a", "EMP-1")
+	tenantB := ehrmsEmployeeStableID("tenant-b", "EMP-1")
+	if tenantA == tenantB {
+		t.Fatalf("same upstream employee number must not collide across tenants: %q", tenantA)
+	}
+	if got := ehrmsEmployeeStableID(" tenant-a ", " emp-1 "); got != tenantA {
+		t.Fatalf("stable employee identity must normalize tenant and employee keys: got %q want %q", got, tenantA)
+	}
+}

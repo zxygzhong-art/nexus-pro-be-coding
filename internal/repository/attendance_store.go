@@ -57,6 +57,15 @@ type AttendanceStore interface {
 	GetAttendanceDailySummaryByExternalRef(ctx context.Context, tenantID, externalRef string) (domain.AttendanceDailySummary, bool, error)
 	GetAttendanceDailySummaryByEmployeeDate(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDailySummary, bool, error)
 	ListAttendanceDailySummaries(ctx context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]domain.AttendanceDailySummary, error)
+	UpsertAttendanceDailyRecord(context.Context, domain.AttendanceDailyRecord) error
+	GetAttendanceDailyRecord(ctx context.Context, tenantID, employeeID, workDate, source string) (domain.AttendanceDailyRecord, bool, error)
+	ListAttendanceDailyRecords(ctx context.Context, tenantID string, employeeIDs []string, fromDate, toDate, source string) ([]domain.AttendanceDailyRecord, error)
+	DeleteAttendanceDailyLeaveSegments(ctx context.Context, tenantID, employeeID, workDate string) error
+	UpsertAttendanceDailyLeaveSegment(context.Context, domain.AttendanceDailyLeaveSegment) error
+	ListAttendanceDailyLeaveSegments(ctx context.Context, tenantID, employeeID, fromDate, toDate string) ([]domain.AttendanceDailyLeaveSegment, error)
+	ListEHRMSLeaveRecordCandidates(ctx context.Context, tenantID, employeeID, leaveTypeID string, fromAt, toAt time.Time) ([]domain.LeaveRecord, error)
+	UpsertAttendanceDailyReconciliation(context.Context, domain.AttendanceDailyReconciliation) error
+	GetAttendanceDailyReconciliation(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDailyReconciliation, bool, error)
 	UpsertAttendanceDayProjection(context.Context, domain.AttendanceDayProjection) error
 	GetAttendanceDayProjection(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDayProjection, bool, error)
 	ListAttendanceDayProjections(ctx context.Context, tenantID string, employeeIDs []string, fromDate, toDate string) ([]domain.AttendanceDayProjection, error)

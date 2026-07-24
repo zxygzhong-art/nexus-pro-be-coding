@@ -145,7 +145,6 @@ type AttendanceFacade interface {
 
 // PlatformFacade 定義平臺 facade 的行為契約。
 type PlatformFacade interface {
-	Home(RequestContext) (PlatformHomeResponse, error)
 	ListAssistants(RequestContext, PlatformAssistantsQuery) (PlatformAssistantsResponse, error)
 	Forms(RequestContext, PlatformFormsQuery) (PlatformFormsResponse, error)
 	Tasks(RequestContext, PlatformTasksQuery) (PlatformTasksResponse, error)

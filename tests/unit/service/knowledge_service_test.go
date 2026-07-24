@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/repository/memory"
@@ -133,6 +134,38 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 	}
 	if pdfDocument.SourceType != "pdf" || !strings.Contains(pdfDocument.Content, "Attendance policy") {
 		t.Fatalf("PDF text was not extracted: %+v", pdfDocument)
+	}
+
+	cjkContent := "特休有十四天，請假前須先提出申請。"
+	cjkDocument, err := agentservice.New(svc).UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
+		Filename: "leave-policy-cjk.pdf", ContentType: "application/pdf", Content: minimalCIDTextPDF(cjkContent, "UniGB-UCS2-H"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cjkDocument.Content != cjkContent {
+		t.Fatalf("CJK PDF text was not decoded from its predefined CMap: got %q", cjkDocument.Content)
+	}
+
+	toUnicodeContent := "特休有十四天"
+	toUnicodeDocument, err := agentservice.New(svc).UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
+		Filename: "leave-policy-type3.pdf", ContentType: "application/pdf", Content: minimalToUnicodeTextPDF(toUnicodeContent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toUnicodeDocument.Content != toUnicodeContent {
+		t.Fatalf("Type 3 PDF text was not decoded from its ToUnicode CMap: got %q", toUnicodeDocument.Content)
+	}
+
+	_, err = agentservice.New(svc).UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
+		Filename: "unsupported-cjk.pdf", ContentType: "application/pdf", Content: minimalCIDTextPDF(cjkContent, "Identity-H"),
+	})
+	if err == nil {
+		t.Fatal("expected unsupported PDF encoding to be rejected instead of indexed as garbled text")
+	}
+	if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 400 || !strings.Contains(appErr.Message, "encoding is not supported") {
+		t.Fatalf("expected unsupported PDF encoding error, got %v", err)
 	}
 
 	if _, err := agentservice.New(svc).UpdateKnowledgeDocument(ctx, base.ID, textDocument.ID, domain.UpdateKnowledgeDocumentInput{}); err == nil {
@@ -363,6 +396,65 @@ func minimalTextPDF(text string) []byte {
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len("BT /F1 12 Tf 72 720 Td ("+escaped+") Tj ET"), "BT /F1 12 Tf 72 720 Td ("+escaped+") Tj ET"),
 	}
+	return buildMinimalPDF(objects)
+}
+
+// minimalCIDTextPDF reproduces CJK PDFs that rely on a predefined Unicode CMap
+// instead of embedding a ToUnicode stream.
+func minimalCIDTextPDF(text, encoding string) []byte {
+	var encoded strings.Builder
+	for _, character := range utf16.Encode([]rune(text)) {
+		fmt.Fprintf(&encoded, "%04X", character)
+	}
+	stream := fmt.Sprintf("BT /F1 12 Tf 72 720 Td <%s> Tj ET", encoded.String())
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		fmt.Sprintf("<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /%s /DescendantFonts [6 0 R] >>", encoding),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+		"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> >>",
+	}
+	return buildMinimalPDF(objects)
+}
+
+func minimalToUnicodeTextPDF(text string) []byte {
+	var encoded strings.Builder
+	var mappings strings.Builder
+	for index, character := range []rune(text) {
+		code := index + 1
+		fmt.Fprintf(&encoded, "%02X", code)
+		var destination strings.Builder
+		for _, codeUnit := range utf16.Encode([]rune{character}) {
+			fmt.Fprintf(&destination, "%04X", codeUnit)
+		}
+		fmt.Fprintf(&mappings, "<%02X> <%s>\n", code, destination.String())
+	}
+	cmap := fmt.Sprintf(`/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+1 begincodespacerange
+<00> <FF>
+endcodespacerange
+%d beginbfchar
+%sendbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end`, len([]rune(text)), mappings.String())
+	stream := fmt.Sprintf("BT /F1 12 Tf 72 720 Td <%s> Tj ET", encoded.String())
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		fmt.Sprintf("<< /Type /Font /Subtype /Type3 /Name /F1 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 1 /LastChar %d /Widths [] /Encoding << /Type /Encoding /Differences [] >> /CharProcs << >> /Resources << >> /ToUnicode 6 0 R >>", len([]rune(text))),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(cmap), cmap),
+	}
+	return buildMinimalPDF(objects)
+}
+
+func buildMinimalPDF(objects []string) []byte {
 	var output bytes.Buffer
 	output.WriteString("%PDF-1.4\n")
 	offsets := make([]int, len(objects)+1)

@@ -13,12 +13,13 @@ const (
 	formDataSourceEmployees   = "employees"
 	formDataSourcePositions   = "positions"
 	formDataSourceLeaveTypes  = "leave_types"
+	formDataSourceWorkStatus  = "work_status"
 )
 
 var formDataSourceAllowedFields = map[string]map[string]struct{}{
 	formDataSourceCurrentUser: {"display_name": {}, "email": {}, "employee_id": {}, "employee_no": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}},
 	formDataSourceDepartments: {"id": {}, "name": {}, "code": {}},
-	formDataSourceEmployees:   {"id": {}, "name": {}, "employee_no": {}, "email": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}},
+	formDataSourceEmployees:   {"id": {}, "name": {}, "employee_no": {}, "email": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}, formDataSourceWorkStatus: {}},
 	formDataSourcePositions:   {"id": {}, "name": {}, "code": {}, "department_id": {}},
 	formDataSourceLeaveTypes:  {"code": {}, "name": {}},
 }
@@ -44,6 +45,20 @@ func ValidateFormFieldBinding(fieldID, fieldType string, binding domain.Platform
 		}
 		if !isFormDataSourceOptionField(fieldType) {
 			return []domain.FieldError{{Field: prefix, Code: "invalid", Message: "collection bindings require an option field"}}
+		}
+	}
+	for filterField, values := range binding.Filters {
+		if sourceID != formDataSourceEmployees || filterField != formDataSourceWorkStatus {
+			return []domain.FieldError{{Field: prefix + ".filters." + filterField, Code: "invalid", Message: "unsupported data source filter"}}
+		}
+		if len(values) == 0 {
+			return []domain.FieldError{{Field: prefix + ".filters." + filterField, Code: "required", Message: "data source filter requires at least one value"}}
+		}
+		for _, value := range values {
+			status, ok := domain.ParseEmployeeStatus(value)
+			if !ok || !status.Valid(false) || string(status) != value {
+				return []domain.FieldError{{Field: prefix + ".filters." + filterField, Code: "invalid", Message: "unsupported employee work status"}}
+			}
 		}
 	}
 	return nil
@@ -84,7 +99,7 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 	if err != nil {
 		return domain.FormDataSourceCatalogResponse{}, err
 	}
-	employees, err := c.Service.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	employees, err := c.Service.listBusinessEmployees(ctx)
 	if err != nil {
 		return domain.FormDataSourceCatalogResponse{}, err
 	}
@@ -121,14 +136,16 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 		if employee.AccountID == account.ID {
 			currentEmployee = employee
 		}
-		if strings.EqualFold(employee.Status, string(domain.EmployeeStatusDeleted)) || strings.EqualFold(employee.Status, string(domain.EmployeeStatusResigned)) {
+		workStatus := domain.NormalizeEmployeeStatus(firstNonEmptyString(employee.EmploymentStatus, employee.Status))
+		if strings.EqualFold(workStatus, string(domain.EmployeeStatusDeleted)) {
 			continue
 		}
 		employeeRecords = append(employeeRecords, map[string]interface{}{
 			"id": employee.ID, "name": employee.Name, "employee_no": employee.EmployeeNo,
 			"email": employee.CompanyEmail, "department_id": employee.OrgUnitID,
 			"department_name": unitNames[employee.OrgUnitID], "position_id": employee.PositionID,
-			"position_name": firstNonEmptyString(positionNames[employee.PositionID], employee.Position),
+			"position_name":          firstNonEmptyString(positionNames[employee.PositionID], employee.Position),
+			formDataSourceWorkStatus: workStatus,
 		})
 	}
 	leaveTypeRecords := make([]map[string]interface{}, 0, len(leaveTypes))
@@ -218,6 +235,7 @@ func employeeDataSourceFields() []domain.FormDataSourceField {
 		{Key: "employee_no", Label: "員工編號", Type: "string"}, {Key: "email", Label: "公司 Email", Type: "string"},
 		{Key: "department_id", Label: "部門 ID", Type: "string"}, {Key: "department_name", Label: "部門名稱", Type: "string"},
 		{Key: "position_id", Label: "崗位 ID", Type: "string"}, {Key: "position_name", Label: "崗位名稱", Type: "string"},
+		{Key: formDataSourceWorkStatus, Label: "工作狀態", Type: "string"},
 	}
 }
 

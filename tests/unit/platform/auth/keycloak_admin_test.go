@@ -159,6 +159,110 @@ func TestKeycloakAdminClientRejectsCrossTenantExistingEmail(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cross-tenant email ownership conflict")
 	}
+	if !errors.Is(err, domain.ErrIdentityProvisioningOwnershipConflict) {
+		t.Fatalf("expected permanent ownership conflict, got %v", err)
+	}
+	if updated {
+		t.Fatal("expected ownership conflict before any Keycloak PUT")
+	}
+}
+
+// TestKeycloakAdminClientRebindsRotatedAccountForSameEmployee verifies stale account IDs can heal after a local data rebuild.
+func TestKeycloakAdminClientRebindsRotatedAccountForSameEmployee(t *testing.T) {
+	updated := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/nexus/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "admin-token", "expires_in": 60})
+	})
+	mux.HandleFunc("/admin/realms/nexus/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected users method %s", r.Method)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": "kc-user-1", "username": "employee@example.com", "email": "employee@example.com",
+			"attributes": map[string][]string{
+				"tenant_id": {"tenant-1"}, "account_id": {"acct-old"},
+				"employee_id": {"emp-old"}, "employee_no": {"E2101"},
+			},
+		}})
+	})
+	mux.HandleFunc("/admin/realms/nexus/users/kc-user-1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("unexpected user method %s", r.Method)
+		}
+		var payload struct {
+			Attributes map[string][]string `json:"attributes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if got := payload.Attributes["account_id"]; len(got) != 1 || got[0] != "acct-new" {
+			t.Fatalf("expected rotated account ownership, got %+v", payload.Attributes)
+		}
+		if got := payload.Attributes["employee_id"]; len(got) != 1 || got[0] != "emp-new" {
+			t.Fatalf("expected current employee ID, got %+v", payload.Attributes)
+		}
+		updated = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
+		IssuerURL: server.URL + "/realms/nexus", ClientID: "admin-client", ClientSecret: "admin-secret",
+	}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := client.EnsureUser(context.Background(), domain.IdentityProvisioningInput{
+		TenantID: "tenant-1", AccountID: "acct-new", EmployeeID: "emp-new",
+		EmployeeNo: "E2101", Email: "employee@example.com", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.Subject != "kc-user-1" || !updated {
+		t.Fatalf("expected existing Keycloak identity to be rebound, identity=%+v updated=%v", identity, updated)
+	}
+}
+
+// TestKeycloakAdminClientRejectsCrossAccountForDifferentEmployee keeps same-tenant email collisions isolated.
+func TestKeycloakAdminClientRejectsCrossAccountForDifferentEmployee(t *testing.T) {
+	updated := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/nexus/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "admin-token", "expires_in": 60})
+	})
+	mux.HandleFunc("/admin/realms/nexus/users", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": "kc-other", "username": "shared@example.com", "email": "shared@example.com",
+			"attributes": map[string][]string{
+				"tenant_id": {"tenant-1"}, "account_id": {"acct-other"}, "employee_no": {"E9999"},
+			},
+		}})
+	})
+	mux.HandleFunc("/admin/realms/nexus/users/kc-other", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			updated = true
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
+		IssuerURL: server.URL + "/realms/nexus", ClientID: "admin-client", ClientSecret: "admin-secret",
+	}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.EnsureUser(context.Background(), domain.IdentityProvisioningInput{
+		TenantID: "tenant-1", AccountID: "acct-1", EmployeeNo: "E2101",
+		Email: "shared@example.com", Enabled: true,
+	})
+	if !errors.Is(err, domain.ErrIdentityProvisioningOwnershipConflict) {
+		t.Fatalf("expected permanent cross-account ownership conflict, got %v", err)
+	}
 	if updated {
 		t.Fatal("expected ownership conflict before any Keycloak PUT")
 	}

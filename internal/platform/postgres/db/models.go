@@ -181,22 +181,67 @@ type AttendanceClockRecord struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
-type AttendanceDailySummary struct {
-	TenantID    string             `json:"tenant_id"`
-	EmployeeID  string             `json:"employee_id"`
-	WorkDate    pgtype.Date        `json:"work_date"`
-	ShiftStart  string             `json:"shift_start"`
-	ShiftEnd    string             `json:"shift_end"`
-	ShiftHours  float64            `json:"shift_hours"`
-	DailyHours  float64            `json:"daily_hours"`
-	ClockHours  float64            `json:"clock_hours"`
-	ClockStart  string             `json:"clock_start"`
-	ClockEnd    string             `json:"clock_end"`
-	Payload     []byte             `json:"payload"`
-	Source      string             `json:"source"`
-	ExternalRef string             `json:"external_ref"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+type AttendanceDailyLeaveSegment struct {
+	TenantID           string             `json:"tenant_id"`
+	EmployeeID         string             `json:"employee_id"`
+	WorkDate           pgtype.Date        `json:"work_date"`
+	DailySource        string             `json:"daily_source"`
+	SegmentNo          int16              `json:"segment_no"`
+	LeaveTypeID        pgtype.Text        `json:"leave_type_id"`
+	SourceLeaveType    string             `json:"source_leave_type"`
+	StartAt            pgtype.Timestamptz `json:"start_at"`
+	EndAt              pgtype.Timestamptz `json:"end_at"`
+	Minutes            int32              `json:"minutes"`
+	Counted            bool               `json:"counted"`
+	TimeInferred       bool               `json:"time_inferred"`
+	LeaveRecordID      pgtype.Text        `json:"leave_record_id"`
+	LinkStatus         string             `json:"link_status"`
+	MatchBasis         string             `json:"match_basis"`
+	CandidateRecordIds []string           `json:"candidate_record_ids"`
+	Payload            []byte             `json:"payload"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceDailyReconciliation struct {
+	TenantID            string             `json:"tenant_id"`
+	EmployeeID          string             `json:"employee_id"`
+	WorkDate            pgtype.Date        `json:"work_date"`
+	LocalFingerprint    string             `json:"local_fingerprint"`
+	EhrmsFingerprint    string             `json:"ehrms_fingerprint"`
+	Status              string             `json:"status"`
+	Differences         []byte             `json:"differences"`
+	ResolutionStatus    string             `json:"resolution_status"`
+	ResolvedByAccountID pgtype.Text        `json:"resolved_by_account_id"`
+	ResolvedAt          pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceDailyRecord struct {
+	TenantID             string             `json:"tenant_id"`
+	EmployeeID           string             `json:"employee_id"`
+	WorkDate             pgtype.Date        `json:"work_date"`
+	Source               string             `json:"source"`
+	ScheduledStartAt     pgtype.Timestamptz `json:"scheduled_start_at"`
+	ScheduledEndAt       pgtype.Timestamptz `json:"scheduled_end_at"`
+	ScheduledMinutes     int32              `json:"scheduled_minutes"`
+	RequiredMinutes      int32              `json:"required_minutes"`
+	WorkedMinutes        int32              `json:"worked_minutes"`
+	CreditedLeaveMinutes int32              `json:"credited_leave_minutes"`
+	OvertimeMinutes      int32              `json:"overtime_minutes"`
+	ClockInAt            pgtype.Timestamptz `json:"clock_in_at"`
+	ClockOutAt           pgtype.Timestamptz `json:"clock_out_at"`
+	ClockInRecordID      pgtype.Text        `json:"clock_in_record_id"`
+	ClockOutRecordID     pgtype.Text        `json:"clock_out_record_id"`
+	PunchCount           int32              `json:"punch_count"`
+	DayStatus            string             `json:"day_status"`
+	AnomalyReasons       []string           `json:"anomaly_reasons"`
+	InputFingerprint     string             `json:"input_fingerprint"`
+	ExternalRef          string             `json:"external_ref"`
+	Payload              []byte             `json:"payload"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AttendanceDayProjection struct {
@@ -442,6 +487,8 @@ type Employee struct {
 	ID                    string             `json:"id"`
 	TenantID              string             `json:"tenant_id"`
 	EmployeeNo            string             `json:"employee_no"`
+	ExternalSource        string             `json:"external_source"`
+	ExternalEmployeeID    string             `json:"external_employee_id"`
 	Name                  string             `json:"name"`
 	CompanyEmail          string             `json:"company_email"`
 	PersonalEmail         string             `json:"personal_email"`
@@ -463,6 +510,9 @@ type Employee struct {
 	ContactInfo           []byte             `json:"contact_info"`
 	InsuranceInfo         []byte             `json:"insurance_info"`
 	InternalExperiences   []byte             `json:"internal_experiences"`
+	SourcePayload         []byte             `json:"source_payload"`
+	SourceUpdatedAt       pgtype.Timestamptz `json:"source_updated_at"`
+	LastSyncedAt          pgtype.Timestamptz `json:"last_synced_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
@@ -737,6 +787,10 @@ type LeaveBalance struct {
 	RemainingMinutes int32 `json:"remaining_minutes"`
 	// 余额来源：nexus / ehrms
 	Source string `json:"source"`
+	// 最近一次上游额度原始字段快照
+	SourcePayload []byte `json:"source_payload"`
+	// 上游额度记录更新时间
+	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
 	// 最近同步时间；Nexus 本地余额可为空
 	LastSyncedAt pgtype.Timestamptz `json:"last_synced_at"`
 	// 更新时间
@@ -781,12 +835,14 @@ type LeaveRecord struct {
 	EmployeeID string `json:"employee_id"`
 	// 假别代码；Nexus 与 eHRMS 使用同一套代码
 	LeaveTypeID string `json:"leave_type_id"`
-	// 本记录唯一对应的年度余额 ID
-	BalanceID string `json:"balance_id"`
-	// 额度所属年度；记录不得跨年度
+	// 匹配到的年度余额 ID；EHRMS 明细允许暂时为空
+	BalanceID pgtype.Text `json:"balance_id"`
+	// 额度所属年度；未匹配余额时取开始日期年度
 	EntitlementYear int32 `json:"entitlement_year"`
 	// 记录来源：nexus / ehrms
 	Source string `json:"source"`
+	// 上游请假明细稳定标识
+	ExternalRef string `json:"external_ref"`
 	// 来源记录创建时间
 	EventDate pgtype.Timestamptz `json:"event_date"`
 	// 请假开始时间
@@ -803,6 +859,14 @@ type LeaveRecord struct {
 	MatchedRecordID pgtype.Text `json:"matched_record_id"`
 	// 双来源核对状态
 	ReconciliationStatus string `json:"reconciliation_status"`
+	// 年度余额关联状态：matched / unmatched
+	BalanceMatchStatus string `json:"balance_match_status"`
+	// 未匹配年度余额的机器可读原因
+	BalanceMatchReason string `json:"balance_match_reason"`
+	// 最近一次上游请假明细原始字段快照
+	SourcePayload []byte `json:"source_payload"`
+	// 上游请假明细记录更新时间
+	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
 	// eHRMS 最近同步看到该记录的时间
 	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 	// eHRMS 记录被上游移除的时间

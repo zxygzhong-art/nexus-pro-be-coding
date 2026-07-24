@@ -149,6 +149,8 @@ type Employee struct {
 	ID                    string               `json:"id"`
 	TenantID              string               `json:"tenant_id"`
 	EmployeeNo            string               `json:"employee_no,omitempty"`
+	ExternalSource        string               `json:"external_source,omitempty"`
+	ExternalEmployeeID    string               `json:"external_employee_id,omitempty"`
 	Name                  string               `json:"name"`
 	CompanyEmail          string               `json:"company_email,omitempty"`
 	PersonalEmail         string               `json:"personal_email,omitempty"`
@@ -170,6 +172,9 @@ type Employee struct {
 	ContactInfo           map[string]any       `json:"contact_info,omitempty"`
 	InsuranceInfo         map[string]any       `json:"insurance_info,omitempty"`
 	InternalExperiences   []EmployeeExperience `json:"internal_experiences,omitempty"`
+	SourcePayload         map[string]any       `json:"-"`
+	SourceUpdatedAt       *time.Time           `json:"source_updated_at,omitempty"`
+	LastSyncedAt          *time.Time           `json:"last_synced_at,omitempty"`
 	CreatedAt             time.Time            `json:"created_at"`
 	UpdatedAt             time.Time            `json:"updated_at"`
 }
@@ -393,16 +398,17 @@ type UpdateEmployeeInput struct {
 
 // EmployeeQuery 定義員工查詢的資料結構。
 type EmployeeQuery struct {
-	Keyword          string                  `json:"keyword,omitempty"`
-	DepartmentID     string                  `json:"department_id,omitempty"`
-	EmploymentStatus string                  `json:"employment_status,omitempty"`
-	Category         string                  `json:"category,omitempty"`
-	PresentFrom      string                  `json:"-"`
-	PresentTo        string                  `json:"-"`
-	Page             int                     `json:"page,omitempty"`
-	PageSize         int                     `json:"page_size,omitempty"`
-	Sort             string                  `json:"sort,omitempty"`
-	Scope            EmployeeScopeConstraint `json:"-"`
+	Keyword            string                  `json:"keyword,omitempty"`
+	DepartmentID       string                  `json:"department_id,omitempty"`
+	EmploymentStatus   string                  `json:"employment_status,omitempty"`
+	Category           string                  `json:"category,omitempty"`
+	IncludeSuperAdmins bool                    `json:"-"`
+	PresentFrom        string                  `json:"-"`
+	PresentTo          string                  `json:"-"`
+	Page               int                     `json:"page,omitempty"`
+	PageSize           int                     `json:"page_size,omitempty"`
+	Sort               string                  `json:"sort,omitempty"`
+	Scope              EmployeeScopeConstraint `json:"-"`
 }
 
 // EmployeeScopeConstraint 定義員工範圍 constraint 的資料結構。

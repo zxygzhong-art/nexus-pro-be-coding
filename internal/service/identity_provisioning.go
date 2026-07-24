@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -130,6 +131,9 @@ func (c *Service) processIdentityProvisioningEvent(ctx context.Context, event do
 		SendInvite:  event.SendInvite,
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrIdentityProvisioningOwnershipConflict) {
+			return c.recordIdentityProvisioningFailure(ctx, event, err.Error())
+		}
 		return c.recordIdentityProvisioningRetry(ctx, event, maxRetries, err.Error())
 	}
 	provider := strings.TrimSpace(external.Provider)

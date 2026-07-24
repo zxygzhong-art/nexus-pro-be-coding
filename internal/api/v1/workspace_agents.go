@@ -48,6 +48,7 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.DELETE("/agents/external-tools/:id", c.routes.Handle("agent.tool", "delete", c.deleteExternalTool, ResourceID(PathParamID)))
 	workspace.GET("/agents", c.routes.Handle("agent.definition", "read", c.listDefinitions))
 	workspace.POST("/agents", c.routes.Handle("agent.definition", "create", c.createDefinition))
+	workspace.GET("/agents/:id", c.routes.Handle("agent.definition", "read", c.getDefinition, ResourceID(PathParamID)))
 	workspace.PATCH("/agents/:id", c.routes.Handle("agent.definition", "update", c.updateDefinition, ResourceID(PathParamID)))
 	workspace.POST("/agents/:id/publish", c.routes.Handle("agent.definition", "update", c.publishDefinition, ResourceID(PathParamID)))
 	workspace.POST("/agents/:id/unpublish", c.routes.Handle("agent.definition", "update", c.unpublishDefinition, ResourceID(PathParamID)))
@@ -137,6 +138,15 @@ func (c WorkspaceAgentCtrl) createDefinition(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+func (c WorkspaceAgentCtrl) getDefinition(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetDefinition(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

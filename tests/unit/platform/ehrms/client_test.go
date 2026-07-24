@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,7 +38,6 @@ func TestListEmployeesCoercesNonStringFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(0)
 	rows, err := client.ListEmployees(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -82,15 +80,15 @@ func TestListAttendanceFetchesAndNormalizesEnglishFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(0)
 	rows, err := client.ListAttendance(context.Background(), domain.EHRMSAttendanceQuery{
 		EmployeeID: "IKM017",
 		Start:      "2026-01-01",
+		End:        "2027-01-01",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/attendance" || gotQuery != "emp_id=IKM017&start=2026-01-01" || gotAPIKey != "secret" {
+	if gotPath != "/attendance" || gotQuery != "emp=IKM017&end=2027-01-01&start=2026-01-01" || gotAPIKey != "secret" {
 		t.Fatalf("unexpected request: path=%s query=%s apiKey=%s", gotPath, gotQuery, gotAPIKey)
 	}
 	if len(rows) != 1 {
@@ -99,6 +97,27 @@ func TestListAttendanceFetchesAndNormalizesEnglishFields(t *testing.T) {
 	row := rows[0]
 	if row["員工編號"] != "IKM017" || row["日期"] != "2026-06-08" || row["班別開始"] != "09:00" || row["刷卡工時"] != "8" {
 		t.Fatalf("expected normalized attendance fields, got %+v", row)
+	}
+}
+
+func TestListAttendanceRejectsRowsOutsideRequestedEmployee(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"emp_id":"OTHER","date":"2026-06-08"}]`))
+	}))
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.ListAttendance(context.Background(), domain.EHRMSAttendanceQuery{
+		EmployeeID: "IKM017",
+		Start:      "2026-01-01",
+		End:        "2027-01-01",
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside requested scope") {
+		t.Fatalf("expected employee scope mismatch, got %v", err)
 	}
 }
 
@@ -115,7 +134,6 @@ func TestRequestErrorClassifiesRetryableStatuses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			client.WithRequestInterval(0)
 			_, err = client.ListEmployees(context.Background())
 			var requestErr *ehrms.RequestError
 			if !errors.As(err, &requestErr) || requestErr.Temporary() != tt.temporary {
@@ -145,7 +163,6 @@ func TestListDepartmentsAndPositions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(0)
 	departments, err := client.ListDepartments(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +195,6 @@ func TestListLeaveTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(0)
 	rows, err := client.ListLeaveTypes(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +224,6 @@ func TestListLeaveTypesAcceptsLeaveTypesEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(0)
 	rows, err := client.ListLeaveTypes(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -220,19 +235,38 @@ func TestListLeaveTypesAcceptsLeaveTypesEnvelope(t *testing.T) {
 
 func TestListLeaveBalancesAndDetails(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/leave-balance", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/leave-entitlement", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "secret" {
 			t.Fatalf("expected X-API-Key header, got %q", r.Header.Get("X-API-Key"))
 		}
+		if got := r.URL.RawQuery; got != "emp=IKM017" {
+			t.Fatalf("expected only emp=IKM017, got %q", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"emp_id":"IKM017","year":2026,"leave_type":"annual","unit":"days","quota":10,"used":2,"remaining":8,"grant_start":"2026-01-01","expire_date":"2026-12-31"}]`))
+		_, _ = w.Write([]byte(`[{
+			"emp_id":"IKM017","year":"2026","unit":"hours","package_version":"v2",
+			"entitlements":{
+				"I001":[{"leave_code":"I001-1","name_zh":"Full Pay Sick Leave","name_en":"全薪病假","quota":40,"used":0,"remaining":40}]
+			}
+		}]`))
 	})
-	mux.HandleFunc("/leave-detail", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/leave", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "secret" {
 			t.Fatalf("expected X-API-Key header, got %q", r.Header.Get("X-API-Key"))
 		}
+		if got := r.URL.RawQuery; got != "emp=IKM017&year=2026" {
+			t.Fatalf("expected emp=IKM017&year=2026, got %q", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"emp_id":"IKM017","date":"2026-06-11","leave_type":"annual","start":"09:00","end":"13:00","hours":"4"}]`))
+		_, _ = w.Write([]byte(`[{
+			"emp_id":"IKM017","leave_type":"外勤","leave_code":"S0013-1","leave_category_code":"S0013","approval_flow":"legacy",
+			"balances":[{"year":2026,"unit":"hours","used":7,"quota":null,"remaining":null}],
+			"details":[{"date":"2026-01-30","start":"2026-01-30 09:00:00","end":"2026-01-30 17:00:00","hours":"7","deduct_hours":"60分鐘","source":"假勤輸入"}]
+		},{
+			"emp_id":"IKM017","leave_type":"特休假","leave_code":"001","leave_category_code":"001",
+			"balances":[{"year":2026,"unit":"hours","used":0,"quota":112,"remaining":112}],
+			"details":[]
+		}]`))
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -241,29 +275,37 @@ func TestListLeaveBalancesAndDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(0)
-	query := domain.EHRMSAttendanceQuery{EmployeeID: "IKM017", Start: "2026-01-01"}
+	query := domain.EHRMSAttendanceQuery{
+		EmployeeID: "IKM017",
+		Start:      "2026-01-01",
+		End:        "2027-01-01",
+		Year:       "2026",
+	}
 	balances, err := client.ListLeaveBalances(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(balances) != 1 || balances[0]["員工編號"] != "IKM017" || balances[0]["假別"] != "annual" || balances[0]["餘額"] != "8" {
-		t.Fatalf("unexpected leave balances: %+v", balances)
+	if len(balances) != 1 || balances[0]["員工編號"] != "IKM017" || balances[0]["假別代碼"] != "I001-1" ||
+		balances[0]["假別類別代碼"] != "I001" || balances[0]["假別"] != "Full Pay Sick Leave" ||
+		balances[0]["餘額"] != "40" || balances[0]["package_version"] != "v2" {
+		t.Fatalf("unexpected leave entitlements: %+v", balances)
 	}
 	details, err := client.ListLeaveDetails(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(details) != 1 || details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-06-11" || details[0]["開始時間"] != "09:00" {
+	if len(details) != 1 || details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-01-30" ||
+		details[0]["開始時間"] != "2026-01-30 09:00:00" || details[0]["假別代碼"] != "S0013-1" ||
+		details[0]["時數"] != "7" || details[0]["approval_flow"] != "legacy" {
 		t.Fatalf("unexpected leave details: %+v", details)
 	}
 }
 
-func TestClientSerializesAndSpacesUpstreamRequests(t *testing.T) {
+func TestClientLimitsConcurrentUpstreamRequestsToTenWithoutInterval(t *testing.T) {
 	var active int32
 	var maxActive int32
-	var startsMu sync.Mutex
-	starts := make([]time.Time, 0, 3)
+	started := make(chan struct{}, ehrms.MaxConcurrentRequests*2)
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		current := atomic.AddInt32(&active, 1)
 		for {
@@ -272,10 +314,8 @@ func TestClientSerializesAndSpacesUpstreamRequests(t *testing.T) {
 				break
 			}
 		}
-		startsMu.Lock()
-		starts = append(starts, time.Now())
-		startsMu.Unlock()
-		time.Sleep(5 * time.Millisecond)
+		started <- struct{}{}
+		<-release
 		atomic.AddInt32(&active, -1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[]`))
@@ -286,10 +326,10 @@ func TestClientSerializesAndSpacesUpstreamRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.WithRequestInterval(20 * time.Millisecond)
 	var wg sync.WaitGroup
-	errs := make(chan error, 3)
-	for range 3 {
+	requestCount := ehrms.MaxConcurrentRequests * 2
+	errs := make(chan error, requestCount)
+	for range requestCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -297,6 +337,19 @@ func TestClientSerializesAndSpacesUpstreamRequests(t *testing.T) {
 			errs <- callErr
 		}()
 	}
+	for range ehrms.MaxConcurrentRequests {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for ten concurrent requests")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("more than ten upstream requests started concurrently")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
 	wg.Wait()
 	close(errs)
 	for callErr := range errs {
@@ -304,19 +357,7 @@ func TestClientSerializesAndSpacesUpstreamRequests(t *testing.T) {
 			t.Fatal(callErr)
 		}
 	}
-	if got := atomic.LoadInt32(&maxActive); got != 1 {
-		t.Fatalf("maximum concurrent upstream requests = %d, want 1", got)
-	}
-	startsMu.Lock()
-	sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
-	gotStarts := append([]time.Time(nil), starts...)
-	startsMu.Unlock()
-	if len(gotStarts) != 3 {
-		t.Fatalf("request starts = %d, want 3", len(gotStarts))
-	}
-	for i := 1; i < len(gotStarts); i++ {
-		if gap := gotStarts[i].Sub(gotStarts[i-1]); gap < 15*time.Millisecond {
-			t.Fatalf("request start gap = %s, want at least 15ms", gap)
-		}
+	if got := atomic.LoadInt32(&maxActive); got != ehrms.MaxConcurrentRequests {
+		t.Fatalf("maximum concurrent upstream requests = %d, want %d", got, ehrms.MaxConcurrentRequests)
 	}
 }

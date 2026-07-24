@@ -596,6 +596,26 @@ SELECT updated_agent.id, updated_agent.tenant_id, target_revision.id AS revision
 FROM updated_agent
 JOIN target_revision ON target_revision.tenant_id = updated_agent.tenant_id AND target_revision.agent_id = updated_agent.id;
 
+-- name: ClaimAgentDefinitionRevision :one
+UPDATE agents
+SET next_revision_no = next_revision_no
+    + CASE WHEN sqlc.arg(create_revision)::boolean THEN 1 ELSE 0 END
+WHERE agents.tenant_id = sqlc.arg(tenant_id)
+  AND agents.id = sqlc.arg(id)
+  AND agents.parent_agent_id IS NULL
+  AND agents.lifecycle_status = 'active'
+  AND EXISTS (
+      SELECT 1
+      FROM agent_revisions current_revision
+      WHERE current_revision.tenant_id = agents.tenant_id
+        AND current_revision.id = agents.draft_revision_id
+        AND current_revision.revision_no = sqlc.arg(expected_version)
+  )
+RETURNING (
+    next_revision_no
+    - CASE WHEN sqlc.arg(create_revision)::boolean THEN 1 ELSE 0 END
+)::integer AS revision_no;
+
 -- name: GetAgentDefinition :one
 WITH selected AS (
     SELECT

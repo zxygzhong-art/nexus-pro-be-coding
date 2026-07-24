@@ -81,3 +81,31 @@ func TestValidateFormDefinitionSchemaV2RejectsUserGroupApproverTargeting(t *test
 		t.Fatalf("expected unsupported user_group_ids error, got %#v", result.Errors)
 	}
 }
+
+func TestCompileFormDefinitionSchemaV2PreservesEmployeeWorkStatusFilters(t *testing.T) {
+	schema := domain.FormDefinitionSchemaV2{
+		SchemaVersion: 2,
+		Name:          "離職交接",
+		Fields: []domain.FormFieldDefinitionV2{{
+			ID: "employee", Label: "員工", DataType: "string", Widget: "select",
+			Binding: &domain.FormFieldBindingV2{
+				SourceID: "employees", ValueField: "id", LabelField: "name",
+				Filters: map[string][]string{"work_status": {"resigned"}},
+			},
+		}},
+		Layout:   domain.FormLayoutV2{Rows: []domain.FormLayoutRowV2{{ID: "row-1", FieldIDs: []string{"employee"}}}},
+		Workflow: domain.FormWorkflowV2{Stages: []domain.FormWorkflowStageV2{{ID: "manager", Type: "approver", Label: "主管", Config: map[string]any{"role": "manager"}}}},
+	}
+
+	compiled, result := domain.CompileFormDefinitionSchemaV2(schema)
+	if !result.Valid {
+		t.Fatalf("expected work-status filter to be valid, got %#v", result.Errors)
+	}
+	design := compiled["workspace_design"].(map[string]any)
+	fields := design["fields"].([]map[string]any)
+	binding := fields[1]["binding"].(map[string]any)
+	filters := binding["filters"].(map[string][]string)
+	if len(filters["work_status"]) != 1 || filters["work_status"][0] != "resigned" {
+		t.Fatalf("expected compiled filter to be preserved, got %#v", binding)
+	}
+}

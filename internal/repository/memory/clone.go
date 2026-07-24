@@ -258,6 +258,15 @@ func copyEmployee(v Employee) Employee {
 	v.ContactInfo = utils.CopyStringMap(v.ContactInfo)
 	v.InsuranceInfo = utils.CopyStringMap(v.InsuranceInfo)
 	v.InternalExperiences = utils.CopyEmployeeExperiences(v.InternalExperiences)
+	v.SourcePayload = utils.CopyStringMap(v.SourcePayload)
+	if v.SourceUpdatedAt != nil {
+		t := *v.SourceUpdatedAt
+		v.SourceUpdatedAt = &t
+	}
+	if v.LastSyncedAt != nil {
+		t := *v.LastSyncedAt
+		v.LastSyncedAt = &t
+	}
 	return v
 }
 
@@ -276,6 +285,11 @@ func copyLeaveBalance(v LeaveBalance) LeaveBalance {
 	if v.LastSyncedAt != nil {
 		t := *v.LastSyncedAt
 		v.LastSyncedAt = &t
+	}
+	v.SourcePayload = utils.CopyStringMap(v.SourcePayload)
+	if v.SourceUpdatedAt != nil {
+		t := *v.SourceUpdatedAt
+		v.SourceUpdatedAt = &t
 	}
 	return v
 }
@@ -305,6 +319,11 @@ func copyLeaveBalanceEntry(v LeaveBalanceEntry) LeaveBalanceEntry {
 }
 
 func copyLeaveRecord(v LeaveRecord) LeaveRecord {
+	v.SourcePayload = utils.CopyStringMap(v.SourcePayload)
+	if v.SourceUpdatedAt != nil {
+		t := *v.SourceUpdatedAt
+		v.SourceUpdatedAt = &t
+	}
 	if v.LastSeenAt != nil {
 		t := *v.LastSeenAt
 		v.LastSeenAt = &t
@@ -332,6 +351,51 @@ func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
 // copyAttendanceDailySummary 複製考勤日彙總。
 func copyAttendanceDailySummary(v AttendanceDailySummary) AttendanceDailySummary {
 	v.Payload = utils.CopyStringMap(v.Payload)
+	return v
+}
+
+func copyAttendanceDailyRecord(v AttendanceDailyRecord) AttendanceDailyRecord {
+	v.AnomalyReasons = utils.CopyStrings(v.AnomalyReasons)
+	v.Payload = utils.CopyStringMap(v.Payload)
+	if v.ScheduledStartAt != nil {
+		t := *v.ScheduledStartAt
+		v.ScheduledStartAt = &t
+	}
+	if v.ScheduledEndAt != nil {
+		t := *v.ScheduledEndAt
+		v.ScheduledEndAt = &t
+	}
+	if v.ClockInAt != nil {
+		t := *v.ClockInAt
+		v.ClockInAt = &t
+	}
+	if v.ClockOutAt != nil {
+		t := *v.ClockOutAt
+		v.ClockOutAt = &t
+	}
+	return v
+}
+
+func copyAttendanceDailyLeaveSegment(v AttendanceDailyLeaveSegment) AttendanceDailyLeaveSegment {
+	v.CandidateRecordIDs = utils.CopyStrings(v.CandidateRecordIDs)
+	v.Payload = utils.CopyStringMap(v.Payload)
+	if v.StartAt != nil {
+		t := *v.StartAt
+		v.StartAt = &t
+	}
+	if v.EndAt != nil {
+		t := *v.EndAt
+		v.EndAt = &t
+	}
+	return v
+}
+
+func copyAttendanceDailyReconciliation(v AttendanceDailyReconciliation) AttendanceDailyReconciliation {
+	v.Differences = utils.CopyStringMap(v.Differences)
+	if v.ResolvedAt != nil {
+		t := *v.ResolvedAt
+		v.ResolvedAt = &t
+	}
 	return v
 }
 

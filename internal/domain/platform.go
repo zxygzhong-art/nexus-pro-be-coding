@@ -41,13 +41,6 @@ type PlatformClockSummary struct {
 	LeaveDays             float64 `json:"leave_days"`
 }
 
-// PlatformHomeResponse 定義平臺首頁回應的資料結構。
-type PlatformHomeResponse struct {
-	Assistants   []PlatformAssistant   `json:"assistants"`
-	FormColumns  []PlatformFormColumn  `json:"form_columns"`
-	ClockSummary *PlatformClockSummary `json:"clock_summary,omitempty"`
-}
-
 // PlatformChatMessage 定義平臺 chat message 的資料結構。
 type PlatformChatMessage struct {
 	ID      string `json:"id"`
@@ -311,9 +304,10 @@ type PlatformFormBuilderFieldOption struct {
 
 // PlatformFormBuilderFieldBinding 定義欄位與受控資料源的持久化綁定。
 type PlatformFormBuilderFieldBinding struct {
-	SourceID   string `json:"source_id"`
-	ValueField string `json:"value_field"`
-	LabelField string `json:"label_field,omitempty"`
+	SourceID   string              `json:"source_id"`
+	ValueField string              `json:"value_field"`
+	LabelField string              `json:"label_field,omitempty"`
+	Filters    map[string][]string `json:"filters,omitempty"`
 }
 
 // PlatformFormBuilderFieldAnalytics 定義欄位可用的統計語意。

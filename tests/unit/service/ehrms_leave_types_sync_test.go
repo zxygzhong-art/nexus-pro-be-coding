@@ -9,7 +9,7 @@ import (
 	"nexus-pro-api/internal/service"
 )
 
-func TestSyncEHRMSAttendanceSyncsLeaveTypesAndConvertsMaxValueToBalanceMinutes(t *testing.T) {
+func TestSyncEHRMSLeaveTypesConvertsMaxValueToBalanceMinutes(t *testing.T) {
 	syncNow := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.clock", Action: "import", Scope: "all"},
@@ -42,11 +42,11 @@ func TestSyncEHRMSAttendanceSyncsLeaveTypesAndConvertsMaxValueToBalanceMinutes(t
 		},
 	}, Now: func() time.Time { return syncNow }})
 
-	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	result, err := svc.Attendance().SyncEHRMSLeaveTypes(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.LeaveTypesFetched != 3 || result.LeaveTypesUpserted != 3 {
+	if result.Fetched != 3 || result.Upserted != 3 {
 		t.Fatalf("unexpected leave type sync counts: %+v", result)
 	}
 

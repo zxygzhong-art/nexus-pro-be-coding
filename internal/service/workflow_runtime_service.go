@@ -913,7 +913,7 @@ func (c WorkflowService) resolveWorkflowAssignees(ctx RequestContext, applicant 
 }
 
 func (c WorkflowService) effectiveManagerEmployeeID(ctx RequestContext, employee Employee, levels int) (string, error) {
-	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	employees, err := c.Service.listBusinessEmployees(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -947,7 +947,7 @@ func (c WorkflowService) resolveWorkflowApplicantEmployee(ctx RequestContext, ap
 	if strings.TrimSpace(applicant.EmployeeID) == "" {
 		return domain.Employee{}, BadRequest("applicant employee is required for workflow routing")
 	}
-	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, applicant.EmployeeID)
+	employee, ok, err := c.Service.getBusinessEmployee(ctx, applicant.EmployeeID)
 	if err != nil {
 		return domain.Employee{}, err
 	}
@@ -960,7 +960,7 @@ func (c WorkflowService) resolveWorkflowApplicantEmployee(ctx RequestContext, ap
 func (c WorkflowService) accountIDsForEmployeeIDs(ctx RequestContext, employeeIDs []string) ([]string, error) {
 	out := make([]string, 0, len(employeeIDs))
 	for _, employeeID := range uniqueWorkflowRecipientIDs(employeeIDs) {
-		employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID)
+		employee, ok, err := c.Service.getBusinessEmployee(ctx, employeeID)
 		if err != nil {
 			return nil, err
 		}
@@ -973,7 +973,7 @@ func (c WorkflowService) accountIDsForEmployeeIDs(ctx RequestContext, employeeID
 }
 
 func (c WorkflowService) resolveRoleAssignees(ctx RequestContext, applicant domain.Employee, keywords []string) ([]string, error) {
-	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	employees, err := c.Service.listBusinessEmployees(ctx)
 	if err != nil {
 		return nil, err
 	}

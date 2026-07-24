@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1910,12 +1911,12 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 		t.Fatalf("expected completed status after valid retry, got %+v", status)
 	}
 
-	home, err := svc.Platform().Home(employeeCtx)
+	summary, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if home.ClockSummary.MonthlyHours != 8 {
-		t.Fatalf("expected actual 8 monthly clock hours, got %+v", home.ClockSummary)
+	if summary.WorkedMinutes != 480 {
+		t.Fatalf("expected actual 8 monthly clock hours (480 minutes), got %+v", summary)
 	}
 }
 
@@ -5171,7 +5172,7 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	detailQueries := make([]domain.EHRMSAttendanceQuery, 0)
 	rows := []domain.EHRMSAttendanceRecord{{
 		"emp_id":           "IKM017",
-		"date":             "2026-06-10",
+		"date":             "2026/06/10",
 		"shift_start":      "09:00",
 		"shift_end":        "18:00",
 		"shift_hours":      "8",
@@ -5235,14 +5236,18 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.Skipped != 0 || result.Failed != 0 || result.Mode != "upsert" || result.Start != "2026-01-01" {
+	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.Skipped != 0 || result.Failed != 0 ||
+		result.Mode != "upsert" || result.Start != "2026-01-01" || result.End != "2027-01-01" {
 		t.Fatalf("unexpected eHRMS attendance sync result: %+v", result)
 	}
-	if len(queries) != 1 || queries[0].EmployeeID != "IKM017" || queries[0].Start != "2026-01-01" || queries[0].End != "" {
-		t.Fatalf("expected one current-tenant employee query with annual start and no end, got %+v", queries)
+	if len(queries) != 1 || queries[0].EmployeeID != "IKM017" || queries[0].Start != "2026-01-01" ||
+		queries[0].End != "2027-01-01" || queries[0].Year != "2026" {
+		t.Fatalf("expected one current-tenant employee query with annual bounds, got %+v", queries)
 	}
-	if len(balanceQueries) != 1 || balanceQueries[0] != queries[0] || len(detailQueries) != 1 || detailQueries[0] != queries[0] {
-		t.Fatalf("expected attendance, leave balance, and leave detail to use the same employee query, balances=%+v details=%+v", balanceQueries, detailQueries)
+	if len(balanceQueries) != 1 || len(detailQueries) != 1 ||
+		balanceQueries[0].EmployeeID != "IKM017" || detailQueries[0].EmployeeID != "IKM017" ||
+		detailQueries[0].Year != "2026" {
+		t.Fatalf("expected attendance, leave balance, and leave detail queries for the current tenant employee, balances=%+v details=%+v", balanceQueries, detailQueries)
 	}
 	summaries, err := store.ListAttendanceDailySummaries(context.Background(), "tenant-1", domain.AttendanceDailySummaryQuery{EmployeeID: "emp-ehrms", FromDate: "2026-06-10", ToDate: "2026-06-10"})
 	if err != nil {
@@ -5289,6 +5294,316 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	}
 	if result.Created != 0 || result.Updated != 1 || result.Skipped != 0 {
 		t.Fatalf("expected idempotent upsert on second sync, got %+v", result)
+	}
+}
+
+func TestSyncEHRMSAttendanceUsesBoundedDayWindow(t *testing.T) {
+	syncNow := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
+	syncLocation := time.FixedZone("Asia/Shanghai", 8*60*60)
+	attendanceQueries := []domain.EHRMSAttendanceQuery{}
+	balanceQueries := []domain.EHRMSAttendanceQuery{}
+	detailQueries := []domain.EHRMSAttendanceQuery{}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+	}, service.Options{
+		EHRMSClient: fakeEHRMSClient{
+			attendanceRows: []domain.EHRMSAttendanceRecord{
+				{"emp_id": "IKM017", "date": "2026-06-19", "shift_hours": "8", "daily_hours": "8", "clock_hours": "8"},
+				{"emp_id": "IKM017", "date": "2026-06-20", "shift_hours": "8", "daily_hours": "8", "clock_hours": "8"},
+			},
+			attendanceQueries: &attendanceQueries,
+			leaveBalances: []domain.EHRMSLeaveBalanceRecord{{
+				"emp_id": "IKM017", "year": "2026", "leave_type": "annual",
+				"unit": "hours", "quota": "80", "used": "8", "remaining": "72",
+			}},
+			leaveBalanceQueries: &balanceQueries,
+			leaveDetails: []domain.EHRMSLeaveDetailRecord{
+				{"record_id": "LEAVE-OLD", "emp_id": "IKM017", "date": "2026-06-19", "leave_type": "annual", "start": "09:00", "end": "10:00", "hours": "1"},
+				{"record_id": "LEAVE-TODAY", "emp_id": "IKM017", "date": "2026-06-20", "leave_type": "annual", "start": "09:00", "end": "10:00", "hours": "1"},
+			},
+			leaveDetailQueries: &detailQueries,
+		},
+		Now: func() time.Time { return syncNow },
+	})
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-ehrms", TenantID: "tenant-1", EmployeeNo: "IKM017",
+		Name: "測試員工", Status: "active", EmploymentStatus: "active",
+		CreatedAt: syncNow, UpdatedAt: syncNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []domain.LeaveRecord{
+		{
+			ID: "leave-before-window", TenantID: "tenant-1", EmployeeID: "emp-ehrms",
+			Source: "ehrms", LeaveTypeID: domain.StableLeaveTypeID("annual"), Status: "active",
+			StartAt:   time.Date(2026, 6, 19, 9, 0, 0, 0, syncLocation),
+			EndAt:     time.Date(2026, 6, 19, 10, 0, 0, 0, syncLocation),
+			UpdatedAt: syncNow,
+		},
+		{
+			ID: "leave-after-window", TenantID: "tenant-1", EmployeeID: "emp-ehrms",
+			Source: "ehrms", LeaveTypeID: domain.StableLeaveTypeID("annual"), Status: "active",
+			StartAt:   time.Date(2026, 6, 21, 9, 0, 0, 0, syncLocation),
+			EndAt:     time.Date(2026, 6, 21, 10, 0, 0, 0, syncLocation),
+			UpdatedAt: syncNow,
+		},
+	} {
+		if err := store.UpsertLeaveRecord(context.Background(), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{
+		Start: "2026-06-20", End: "2026-06-21", SkipLeaveTypes: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Start != "2026-06-20" || result.End != "2026-06-21" ||
+		result.Fetched != 1 || result.LeaveBalancesFetched != 1 || result.LeaveDetailsFetched != 1 ||
+		result.LeaveTypesFetched != 0 {
+		t.Fatalf("unexpected bounded sync result: %+v", result)
+	}
+	for name, queries := range map[string][]domain.EHRMSAttendanceQuery{
+		"attendance": attendanceQueries,
+		"balance":    balanceQueries,
+		"detail":     detailQueries,
+	} {
+		if len(queries) != 1 || queries[0].Start != "2026-06-20" ||
+			queries[0].End != "2026-06-21" || queries[0].Year != "2026" {
+			t.Fatalf("%s query did not use daily bounds: %+v", name, queries)
+		}
+	}
+	summaries, err := store.ListAttendanceDailySummaries(context.Background(), "tenant-1", domain.AttendanceDailySummaryQuery{EmployeeID: "emp-ehrms"})
+	if err != nil || len(summaries) != 1 || summaries[0].WorkDate != "2026-06-20" {
+		t.Fatalf("expected only today's attendance, summaries=%+v err=%v", summaries, err)
+	}
+	leaveRecords, err := store.ListLeaveRecords(context.Background(), "tenant-1")
+	if err != nil || len(leaveRecords) != 3 {
+		t.Fatalf("expected today's detail plus untouched records outside the window, records=%+v err=%v", leaveRecords, err)
+	}
+	byID := map[string]domain.LeaveRecord{}
+	for _, record := range leaveRecords {
+		byID[record.ID] = record
+	}
+	if byID["leave-before-window"].DeletedAt != nil || byID["leave-after-window"].DeletedAt != nil {
+		t.Fatalf("bounded sync must not tombstone records outside today: %+v", byID)
+	}
+	todayFound := false
+	for _, record := range leaveRecords {
+		if record.SourcePayload["record_id"] == "LEAVE-TODAY" {
+			todayFound = true
+		}
+	}
+	if !todayFound {
+		t.Fatalf("expected today's leave detail, records=%+v", leaveRecords)
+	}
+}
+
+type attendanceConcurrencyClient struct {
+	fakeEHRMSClient
+	active    int32
+	maxActive int32
+	started   chan struct{}
+	release   chan struct{}
+}
+
+func (c *attendanceConcurrencyClient) ListAttendance(ctx context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSAttendanceRecord, error) {
+	current := atomic.AddInt32(&c.active, 1)
+	defer atomic.AddInt32(&c.active, -1)
+	for {
+		maximum := atomic.LoadInt32(&c.maxActive)
+		if current <= maximum || atomic.CompareAndSwapInt32(&c.maxActive, maximum, current) {
+			break
+		}
+	}
+	c.started <- struct{}{}
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return ehrms.NormalizeAttendanceRecords([]domain.EHRMSAttendanceRecord{{
+		"emp_id":      query.EmployeeID,
+		"date":        "2026-06-10",
+		"shift_start": "09:00",
+		"shift_end":   "18:00",
+		"shift_hours": "8",
+		"daily_hours": "8",
+		"clock_hours": "8",
+	}}), nil
+}
+
+func TestSyncEHRMSAttendanceFetchesAtMostTenEmployeesConcurrently(t *testing.T) {
+	const employeeCount = 20
+	client := &attendanceConcurrencyClient{
+		started: make(chan struct{}, employeeCount),
+		release: make(chan struct{}),
+	}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+	}, service.Options{
+		EHRMSClient: client,
+		Now: func() time.Time {
+			return time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
+		},
+	})
+	for index := range employeeCount {
+		employeeNo := fmt.Sprintf("IKM%03d", index)
+		if err := store.UpsertEmployee(context.Background(), domain.Employee{
+			ID:               "emp-" + employeeNo,
+			TenantID:         "tenant-1",
+			EmployeeNo:       employeeNo,
+			Name:             employeeNo,
+			Status:           "active",
+			EmploymentStatus: "active",
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type syncResult struct {
+		response domain.EHRMSAttendanceSyncResponse
+		err      error
+	}
+	done := make(chan syncResult, 1)
+	go func() {
+		response, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+		done <- syncResult{response: response, err: err}
+	}()
+
+	for range 10 {
+		select {
+		case <-client.started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for ten concurrent employee fetches")
+		}
+	}
+	select {
+	case <-client.started:
+		t.Fatal("more than ten employee fetches started concurrently")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(client.release)
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.response.Fetched != employeeCount || result.response.Created != employeeCount {
+			t.Fatalf("unexpected concurrent sync result: %+v", result.response)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for concurrent attendance sync")
+	}
+	if got := atomic.LoadInt32(&client.maxActive); got != 10 {
+		t.Fatalf("maximum concurrent employee fetches = %d, want 10", got)
+	}
+}
+
+func TestSyncEHRMSAttendanceLinksCrossDayLeaveDetailToDailySegment(t *testing.T) {
+	syncNow := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{
+		leaveTypes: []domain.EHRMSLeaveTypeRecord{{
+			"code": "annual", "kind": "item", "name_zh": "特休假", "unit": "hours",
+		}},
+		attendanceRows: []domain.EHRMSAttendanceRecord{{
+			"emp_id": "IKM018", "date": "2026-07-09",
+			"shift_start": "09:00", "shift_end": "17:00", "shift_hours": "7",
+			"daily_hours": "0", "clock_hours": "0",
+			"leave_type": "特休假", "leave_start": "2026-07-06 09:00",
+			"leave_end": "17:00", "leave_hours": "7.00", "leave_counted": "V",
+		}},
+		leaveBalances: []domain.EHRMSLeaveBalanceRecord{{
+			"emp_id": "IKM018", "year": "2026", "leave_type": "特休假",
+			"leave_code": "annual", "unit": "hours", "quota": "140", "used": "28", "remaining": "112",
+		}},
+		leaveDetails: []domain.EHRMSLeaveDetailRecord{{
+			"record_id": "ehrms-cross-day-1", "emp_id": "IKM018", "date": "2026-07-09",
+			"leave_type": "特休假", "leave_code": "annual",
+			"start": "2026-07-06 09:00", "end": "2026-07-09 17:00", "hours": "28",
+		}},
+	}, Now: func() time.Time { return syncNow }})
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-ehrms-leave", TenantID: "tenant-1", EmployeeNo: "IKM018",
+		Name: "測試員工IKM018", Status: "active", EmploymentStatus: "active",
+		CreatedAt: syncNow, UpdatedAt: syncNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created != 1 || result.LeaveDetailsCreated != 1 || result.LeaveDetailsFailed != 0 {
+		t.Fatalf("unexpected eHRMS sync result: %+v", result)
+	}
+
+	segments, err := store.ListAttendanceDailyLeaveSegments(
+		context.Background(), "tenant-1", "emp-ehrms-leave", "2026-07-09", "2026-07-09",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("expected one normalized daily leave segment, got %+v", segments)
+	}
+	segment := segments[0]
+	if segment.DailySource != "ehrms" || segment.SegmentNo != 1 || segment.LeaveTypeID != "annual" || segment.SourceLeaveType != "特休假" ||
+		segment.Minutes != 420 || !segment.Counted || !segment.TimeInferred ||
+		segment.LinkStatus != "matched" || segment.LeaveRecordID == "" ||
+		segment.MatchBasis != "employee+type+exact_interval" {
+		t.Fatalf("unexpected linked daily leave segment: %+v", segment)
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	if segment.StartAt == nil || segment.EndAt == nil ||
+		segment.StartAt.In(location).Format("2006-01-02 15:04") != "2026-07-09 09:00" ||
+		segment.EndAt.In(location).Format("2006-01-02 15:04") != "2026-07-09 17:00" {
+		t.Fatalf("cross-day leave must be clipped to the attendance work date: %+v", segment)
+	}
+	leaveRecord, ok, err := store.GetLeaveRecord(context.Background(), "tenant-1", segment.LeaveRecordID)
+	if err != nil || !ok {
+		t.Fatalf("linked eHRMS leave record missing, ok=%v err=%v", ok, err)
+	}
+	if leaveRecord.Source != "ehrms" || leaveRecord.EmployeeID != "emp-ehrms-leave" ||
+		leaveRecord.StartAt.In(location).Format("2006-01-02 15:04") != "2026-07-06 09:00" ||
+		leaveRecord.EndAt.In(location).Format("2006-01-02 15:04") != "2026-07-09 17:00" {
+		t.Fatalf("daily segment must point to the unsplit eHRMS leave detail: %+v", leaveRecord)
+	}
+	ehrmsDay, ok, err := store.GetAttendanceDailyRecord(
+		context.Background(), "tenant-1", "emp-ehrms-leave", "2026-07-09", "ehrms",
+	)
+	if err != nil || !ok {
+		t.Fatalf("unified eHRMS daily record missing, ok=%v err=%v", ok, err)
+	}
+	if ehrmsDay.ScheduledMinutes != 420 || ehrmsDay.RequiredMinutes != 0 ||
+		ehrmsDay.WorkedMinutes != 0 || ehrmsDay.CreditedLeaveMinutes != 420 {
+		t.Fatalf("unexpected unified eHRMS daily record: %+v", ehrmsDay)
+	}
+	localDay, ok, err := store.GetAttendanceDailyRecord(
+		context.Background(), "tenant-1", "emp-ehrms-leave", "2026-07-09", "local",
+	)
+	if err != nil || !ok {
+		t.Fatalf("unified local daily record missing, ok=%v err=%v", ok, err)
+	}
+	if localDay.CreditedLeaveMinutes != 420 || localDay.InputFingerprint == "" {
+		t.Fatalf("unexpected unified local daily record: %+v", localDay)
+	}
+	reconciliation, ok, err := store.GetAttendanceDailyReconciliation(
+		context.Background(), "tenant-1", "emp-ehrms-leave", "2026-07-09",
+	)
+	if err != nil || !ok {
+		t.Fatalf("daily reconciliation missing, ok=%v err=%v", ok, err)
+	}
+	if reconciliation.Status != "mismatch" || reconciliation.LocalFingerprint == "" ||
+		reconciliation.EHRMSFingerprint == "" || len(reconciliation.Differences) == 0 {
+		t.Fatalf("unexpected daily reconciliation: %+v", reconciliation)
 	}
 }
 
@@ -6950,7 +7265,7 @@ func (c fakeEHRMSClient) ListLeaveTypes(context.Context) ([]domain.EHRMSLeaveTyp
 	return ehrms.NormalizeLeaveTypeRecords(c.leaveTypes), nil
 }
 
-// ListLeaveBalances 驗證假別餘額。
+// ListLeaveBalances 驗證假別餘額（對應上游 /leave-entitlement）。
 func (c fakeEHRMSClient) ListLeaveBalances(_ context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveBalanceRecord, error) {
 	if c.leaveBalanceQueries != nil {
 		*c.leaveBalanceQueries = append(*c.leaveBalanceQueries, query)
@@ -6959,6 +7274,9 @@ func (c fakeEHRMSClient) ListLeaveBalances(_ context.Context, query domain.EHRMS
 		return nil, c.leaveBalanceErr
 	}
 	rows := ehrms.NormalizeLeaveBalanceRecords(c.leaveBalances)
+	if query.EmployeeID == "" {
+		return rows, nil
+	}
 	filtered := make([]domain.EHRMSLeaveBalanceRecord, 0, len(rows))
 	for _, row := range rows {
 		if strings.TrimSpace(row["員工編號"]) == query.EmployeeID {
@@ -6968,7 +7286,7 @@ func (c fakeEHRMSClient) ListLeaveBalances(_ context.Context, query domain.EHRMS
 	return filtered, nil
 }
 
-// ListLeaveDetails 驗證假別明細。
+// ListLeaveDetails 驗證假別明細（對應上游 /leave）。
 func (c fakeEHRMSClient) ListLeaveDetails(_ context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveDetailRecord, error) {
 	if c.leaveDetailQueries != nil {
 		*c.leaveDetailQueries = append(*c.leaveDetailQueries, query)
@@ -6977,6 +7295,9 @@ func (c fakeEHRMSClient) ListLeaveDetails(_ context.Context, query domain.EHRMSA
 		return nil, c.leaveDetailErr
 	}
 	rows := ehrms.NormalizeLeaveDetailRecords(c.leaveDetails)
+	if query.EmployeeID == "" {
+		return rows, nil
+	}
 	filtered := make([]domain.EHRMSLeaveDetailRecord, 0, len(rows))
 	for _, row := range rows {
 		if strings.TrimSpace(row["員工編號"]) == query.EmployeeID {

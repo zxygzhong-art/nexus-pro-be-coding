@@ -39,6 +39,9 @@ type (
 	AttendanceWorksite              = domain.AttendanceWorksite
 	AttendanceClockRecord           = domain.AttendanceClockRecord
 	AttendanceDailySummary          = domain.AttendanceDailySummary
+	AttendanceDailyRecord           = domain.AttendanceDailyRecord
+	AttendanceDailyLeaveSegment     = domain.AttendanceDailyLeaveSegment
+	AttendanceDailyReconciliation   = domain.AttendanceDailyReconciliation
 	AttendanceDayProjection         = domain.AttendanceDayProjection
 	AttendanceCorrectionRequest     = domain.AttendanceCorrectionRequest
 	OvertimeRequest                 = domain.OvertimeRequest

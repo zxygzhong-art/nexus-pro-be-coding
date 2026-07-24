@@ -42,7 +42,7 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 	if !decision.Allowed {
 		return AttendanceClockStatus{}, Forbidden(decision.Reason)
 	}
-	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
+	employee, ok, err := c.Service.getBusinessEmployee(ctx, account.EmployeeID)
 	if err != nil {
 		return AttendanceClockStatus{}, err
 	}

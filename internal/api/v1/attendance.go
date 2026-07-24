@@ -3,6 +3,7 @@ package v1
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -237,12 +238,23 @@ func (c AttendanceCtrl) syncEHRMSAttendance(w http.ResponseWriter, r *http.Reque
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
 		return err
 	}
+	defaultManualEHRMSAttendanceSyncRange(&input, time.Now())
 	item, err := c.svc.SyncEHRMSAttendance(ctx, input)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, item)
 	return nil
+}
+
+func defaultManualEHRMSAttendanceSyncRange(input *domain.EHRMSAttendanceSyncInput, now time.Time) {
+	if strings.TrimSpace(input.Start) != "" || strings.TrimSpace(input.End) != "" {
+		return
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	start := now.In(location)
+	input.Start = start.Format(time.DateOnly)
+	input.End = start.AddDate(0, 0, 1).Format(time.DateOnly)
 }
 
 // listCorrections 處理 corrections 的 HTTP 請求。

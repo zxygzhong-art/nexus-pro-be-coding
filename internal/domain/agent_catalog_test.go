@@ -4,8 +4,8 @@ import "testing"
 
 func TestAgentToolCatalogHasCompletePresentationMetadata(t *testing.T) {
 	catalog := AgentToolCatalog()
-	if len(catalog) != 24 {
-		t.Fatalf("expected 24 agent tools, got %d", len(catalog))
+	if len(catalog) != 38 {
+		t.Fatalf("expected 38 agent tools, got %d", len(catalog))
 	}
 
 	seen := make(map[string]struct{}, len(catalog))

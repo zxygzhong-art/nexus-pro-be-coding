@@ -1227,6 +1227,8 @@ func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error
 		ID:                    v.ID,
 		TenantID:              v.TenantID,
 		EmployeeNo:            v.EmployeeNo,
+		ExternalSource:        v.ExternalSource,
+		ExternalEmployeeID:    v.ExternalEmployeeID,
 		Name:                  v.Name,
 		CompanyEmail:          v.CompanyEmail,
 		PersonalEmail:         v.PersonalEmail,
@@ -1247,6 +1249,9 @@ func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error
 		ContactInfo:           mustJSON(v.ContactInfo),
 		InsuranceInfo:         mustJSON(v.InsuranceInfo),
 		InternalExperiences:   mustJSON(v.InternalExperiences),
+		SourcePayload:         mustJSON(v.SourcePayload),
+		SourceUpdatedAt:       nullableTimestamptz(v.SourceUpdatedAt),
+		LastSyncedAt:          nullableTimestamptz(v.LastSyncedAt),
 		CreatedAt:             timestamptz(v.CreatedAt),
 		UpdatedAt:             timestamptz(v.UpdatedAt),
 	})
@@ -1347,19 +1352,20 @@ func (s *Store) ListEmployees(execCtx context.Context, tenantID string) ([]domai
 // ListEmployeesByQuery 從儲存層列出員工 by 查詢。
 func (s *Store) ListEmployeesByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, error) {
 	items, err := s.q.ListEmployeesFiltered(execCtx, sqlc.ListEmployeesFilteredParams{
-		TenantID:         tenantID,
-		ScopeDenyAll:     query.Scope.DenyAll,
-		ScopeMatchAny:    query.Scope.MatchAnyEntity,
-		ScopeEmployeeIds: query.Scope.EmployeeIDs,
-		ScopeOrgUnitIds:  query.Scope.OrgUnitIDs,
-		ScopeStatuses:    query.Scope.Statuses,
-		Keyword:          query.Keyword,
-		DepartmentID:     query.DepartmentID,
-		EmploymentStatus: query.EmploymentStatus,
-		Category:         query.Category,
-		PresentFrom:      query.PresentFrom,
-		PresentTo:        query.PresentTo,
-		Sort:             query.Sort,
+		TenantID:           tenantID,
+		ScopeDenyAll:       query.Scope.DenyAll,
+		ScopeMatchAny:      query.Scope.MatchAnyEntity,
+		ScopeEmployeeIds:   query.Scope.EmployeeIDs,
+		ScopeOrgUnitIds:    query.Scope.OrgUnitIDs,
+		ScopeStatuses:      query.Scope.Statuses,
+		Keyword:            query.Keyword,
+		DepartmentID:       query.DepartmentID,
+		EmploymentStatus:   query.EmploymentStatus,
+		Category:           query.Category,
+		IncludeSuperAdmins: query.IncludeSuperAdmins,
+		PresentFrom:        query.PresentFrom,
+		PresentTo:          query.PresentTo,
+		Sort:               query.Sort,
 	})
 	if err != nil {
 		return nil, err
@@ -1370,18 +1376,19 @@ func (s *Store) ListEmployeesByQuery(execCtx context.Context, tenantID string, q
 // ListEmployeePageByQuery 從儲存層列出員工分頁 by 查詢。
 func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, int, error) {
 	params := sqlc.CountEmployeesFilteredParams{
-		TenantID:         tenantID,
-		ScopeDenyAll:     query.Scope.DenyAll,
-		ScopeMatchAny:    query.Scope.MatchAnyEntity,
-		ScopeEmployeeIds: query.Scope.EmployeeIDs,
-		ScopeOrgUnitIds:  query.Scope.OrgUnitIDs,
-		ScopeStatuses:    query.Scope.Statuses,
-		Keyword:          query.Keyword,
-		DepartmentID:     query.DepartmentID,
-		EmploymentStatus: query.EmploymentStatus,
-		Category:         query.Category,
-		PresentFrom:      query.PresentFrom,
-		PresentTo:        query.PresentTo,
+		TenantID:           tenantID,
+		ScopeDenyAll:       query.Scope.DenyAll,
+		ScopeMatchAny:      query.Scope.MatchAnyEntity,
+		ScopeEmployeeIds:   query.Scope.EmployeeIDs,
+		ScopeOrgUnitIds:    query.Scope.OrgUnitIDs,
+		ScopeStatuses:      query.Scope.Statuses,
+		Keyword:            query.Keyword,
+		DepartmentID:       query.DepartmentID,
+		EmploymentStatus:   query.EmploymentStatus,
+		Category:           query.Category,
+		IncludeSuperAdmins: query.IncludeSuperAdmins,
+		PresentFrom:        query.PresentFrom,
+		PresentTo:          query.PresentTo,
 	}
 	total, err := s.q.CountEmployeesFiltered(execCtx, params)
 	if err != nil {
@@ -1396,21 +1403,22 @@ func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string
 		pageSize = 20
 	}
 	items, err := s.q.ListEmployeesFilteredPage(execCtx, sqlc.ListEmployeesFilteredPageParams{
-		TenantID:         params.TenantID,
-		ScopeDenyAll:     params.ScopeDenyAll,
-		ScopeMatchAny:    params.ScopeMatchAny,
-		ScopeEmployeeIds: params.ScopeEmployeeIds,
-		ScopeOrgUnitIds:  params.ScopeOrgUnitIds,
-		ScopeStatuses:    params.ScopeStatuses,
-		Keyword:          params.Keyword,
-		DepartmentID:     params.DepartmentID,
-		EmploymentStatus: params.EmploymentStatus,
-		Category:         params.Category,
-		PresentFrom:      params.PresentFrom,
-		PresentTo:        params.PresentTo,
-		Sort:             query.Sort,
-		OffsetCount:      int32((page - 1) * pageSize),
-		LimitCount:       int32(pageSize),
+		TenantID:           params.TenantID,
+		ScopeDenyAll:       params.ScopeDenyAll,
+		ScopeMatchAny:      params.ScopeMatchAny,
+		ScopeEmployeeIds:   params.ScopeEmployeeIds,
+		ScopeOrgUnitIds:    params.ScopeOrgUnitIds,
+		ScopeStatuses:      params.ScopeStatuses,
+		Keyword:            params.Keyword,
+		DepartmentID:       params.DepartmentID,
+		EmploymentStatus:   params.EmploymentStatus,
+		Category:           params.Category,
+		IncludeSuperAdmins: params.IncludeSuperAdmins,
+		PresentFrom:        params.PresentFrom,
+		PresentTo:          params.PresentTo,
+		Sort:               query.Sort,
+		OffsetCount:        int32((page - 1) * pageSize),
+		LimitCount:         int32(pageSize),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -1732,6 +1740,7 @@ func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalanc
 		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
 		EntitlementYear: int32(v.EntitlementYear), GrantedMinutes: int32(v.GrantedMinutes),
 		UsedMinutes: int32(v.UsedMinutes), RemainingMinutes: int32(v.RemainingMinutes), Source: source,
+		SourcePayload: mustJSON(v.SourcePayload), SourceUpdatedAt: nullableTimestamptz(v.SourceUpdatedAt),
 		LastSyncedAt: nullableTimestamptz(v.LastSyncedAt), UpdatedAt: timestamptz(v.UpdatedAt),
 	})
 	return err
@@ -1904,12 +1913,21 @@ func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveReques
 }
 
 func (s *Store) UpsertLeaveRecord(execCtx context.Context, v domain.LeaveRecord) error {
+	if strings.TrimSpace(v.BalanceMatchStatus) == "" {
+		v.BalanceMatchStatus = "unmatched"
+		if strings.TrimSpace(v.BalanceID) != "" {
+			v.BalanceMatchStatus = "matched"
+		}
+	}
 	_, err := s.q.UpsertLeaveRecord(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRecordParams{
 		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
-		BalanceID: v.BalanceID, EntitlementYear: int32(v.EntitlementYear), Source: v.Source,
-		EventDate: timestamptz(v.EventDate), StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt),
+		BalanceID: nullableText(v.BalanceID), EntitlementYear: int32(v.EntitlementYear), Source: v.Source,
+		ExternalRef: v.ExternalRef,
+		EventDate:   timestamptz(v.EventDate), StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt),
 		NetMinutes: int32(v.NetMinutes), Remark: v.Remark, Status: v.Status,
 		MatchedRecordID: nullableText(v.MatchedRecordID), ReconciliationStatus: v.ReconciliationStatus,
+		BalanceMatchStatus: v.BalanceMatchStatus, BalanceMatchReason: v.BalanceMatchReason,
+		SourcePayload: mustJSON(v.SourcePayload), SourceUpdatedAt: nullableTimestamptz(v.SourceUpdatedAt),
 		LastSeenAt: nullableTimestamptz(v.LastSeenAt), DeletedAt: nullableTimestamptz(v.DeletedAt),
 		UpdatedAt: timestamptz(v.UpdatedAt),
 	})
@@ -2151,78 +2169,185 @@ func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID str
 
 // UpsertAttendanceDailySummary 從儲存層處理 upsert 考勤日彙總。
 func (s *Store) UpsertAttendanceDailySummary(execCtx context.Context, v domain.AttendanceDailySummary) error {
-	workDate, err := requiredDate(v.WorkDate)
-	if err != nil {
-		return err
-	}
-	_, err = s.q.UpsertAttendanceDailySummary(tenantContext(execCtx, v.TenantID), sqlc.UpsertAttendanceDailySummaryParams{
-		TenantID:    v.TenantID,
-		EmployeeID:  v.EmployeeID,
-		WorkDate:    workDate,
-		ShiftStart:  v.ShiftStart,
-		ShiftEnd:    v.ShiftEnd,
-		ShiftHours:  v.ShiftHours,
-		DailyHours:  v.DailyHours,
-		ClockHours:  v.ClockHours,
-		ClockStart:  v.ClockStart,
-		ClockEnd:    v.ClockEnd,
-		Payload:     mustJSON(v.Payload),
-		Source:      v.Source,
-		ExternalRef: v.ExternalRef,
-		CreatedAt:   timestamptz(v.CreatedAt),
-		UpdatedAt:   timestamptz(v.UpdatedAt),
-	})
-	if isUniqueConstraint(err, "attendance_daily_summaries_pkey") {
-		return domain.Conflict("attendance daily summary already exists")
-	}
-	if isUniqueConstraint(err, "attendance_daily_summaries_external_ref_idx") {
-		return domain.Conflict("attendance daily summary external_ref already exists")
-	}
-	return err
+	return s.UpsertAttendanceDailyRecord(execCtx, domain.AttendanceDailyRecordFromSummary(v))
 }
 
 // GetAttendanceDailySummaryByExternalRef 從儲存層取得考勤日彙總 by external ref。
 func (s *Store) GetAttendanceDailySummaryByExternalRef(execCtx context.Context, tenantID, externalRef string) (domain.AttendanceDailySummary, bool, error) {
-	v, err := s.q.GetAttendanceDailySummaryByExternalRef(tenantContext(execCtx, tenantID), sqlc.GetAttendanceDailySummaryByExternalRefParams{TenantID: tenantID, ExternalRef: externalRef})
+	v, err := s.q.GetAttendanceDailyRecordByExternalRef(tenantContext(execCtx, tenantID), sqlc.GetAttendanceDailyRecordByExternalRefParams{
+		TenantID: tenantID, ExternalRef: externalRef,
+	})
 	if isNotFound(err) {
 		return domain.AttendanceDailySummary{}, false, nil
 	}
 	if err != nil {
 		return domain.AttendanceDailySummary{}, false, err
 	}
-	return fromAttendanceDailySummary(v), true, nil
+	return domain.AttendanceDailySummaryFromRecord(fromAttendanceDailyRecord(v)), true, nil
 }
 
 // GetAttendanceDailySummaryByEmployeeDate 從儲存層取得考勤日彙總 by 員工日期。
 func (s *Store) GetAttendanceDailySummaryByEmployeeDate(execCtx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDailySummary, bool, error) {
-	date, err := requiredDate(workDate)
+	v, ok, err := s.GetAttendanceDailyRecord(execCtx, tenantID, employeeID, workDate, "ehrms")
 	if err != nil {
 		return domain.AttendanceDailySummary{}, false, err
 	}
-	v, err := s.q.GetAttendanceDailySummaryByEmployeeDate(tenantContext(execCtx, tenantID), sqlc.GetAttendanceDailySummaryByEmployeeDateParams{TenantID: tenantID, EmployeeID: employeeID, WorkDate: date})
-	if isNotFound(err) {
+	if !ok {
 		return domain.AttendanceDailySummary{}, false, nil
 	}
-	if err != nil {
-		return domain.AttendanceDailySummary{}, false, err
-	}
-	return fromAttendanceDailySummary(v), true, nil
+	return domain.AttendanceDailySummaryFromRecord(v), true, nil
 }
 
 // ListAttendanceDailySummaries 從儲存層列出考勤日彙總。
 func (s *Store) ListAttendanceDailySummaries(execCtx context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]domain.AttendanceDailySummary, error) {
-	items, err := s.q.ListAttendanceDailySummaries(tenantContext(execCtx, tenantID), sqlc.ListAttendanceDailySummariesParams{
-		TenantID:    tenantID,
-		EmployeeID:  query.EmployeeID,
-		EmployeeIds: query.EmployeeIDs,
-		FromDate:    query.FromDate,
-		ToDate:      query.ToDate,
-		Source:      query.Source,
+	employeeIDs := append([]string(nil), query.EmployeeIDs...)
+	if strings.TrimSpace(query.EmployeeID) != "" {
+		employeeIDs = append(employeeIDs, query.EmployeeID)
+	}
+	source := strings.TrimSpace(query.Source)
+	if source == "" {
+		source = "ehrms"
+	}
+	items, err := s.ListAttendanceDailyRecords(execCtx, tenantID, employeeIDs, query.FromDate, query.ToDate, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.AttendanceDailySummary, 0, len(items))
+	for _, item := range items {
+		out = append(out, domain.AttendanceDailySummaryFromRecord(item))
+	}
+	return out, nil
+}
+
+func (s *Store) UpsertAttendanceDailyRecord(execCtx context.Context, v domain.AttendanceDailyRecord) error {
+	workDate, err := requiredDate(v.WorkDate)
+	if err != nil {
+		return err
+	}
+	_, err = s.q.UpsertAttendanceDailyRecord(tenantContext(execCtx, v.TenantID), sqlc.UpsertAttendanceDailyRecordParams{
+		TenantID: v.TenantID, EmployeeID: v.EmployeeID, WorkDate: workDate, Source: v.Source,
+		ScheduledStartAt: nullableTimestamptz(v.ScheduledStartAt), ScheduledEndAt: nullableTimestamptz(v.ScheduledEndAt),
+		ScheduledMinutes: int32(v.ScheduledMinutes), RequiredMinutes: int32(v.RequiredMinutes),
+		WorkedMinutes: int32(v.WorkedMinutes), CreditedLeaveMinutes: int32(v.CreditedLeaveMinutes),
+		OvertimeMinutes: int32(v.OvertimeMinutes), ClockInAt: nullableTimestamptz(v.ClockInAt),
+		ClockOutAt: nullableTimestamptz(v.ClockOutAt), ClockInRecordID: nullableText(v.ClockInRecordID),
+		ClockOutRecordID: nullableText(v.ClockOutRecordID), PunchCount: int32(v.PunchCount),
+		DayStatus: v.DayStatus, AnomalyReasons: textArray(v.AnomalyReasons),
+		InputFingerprint: v.InputFingerprint, ExternalRef: v.ExternalRef,
+		Payload: mustJSON(v.Payload), CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	if isUniqueConstraint(err, "attendance_daily_records_external_ref_idx") {
+		return domain.Conflict("attendance daily record external_ref already exists")
+	}
+	return err
+}
+
+func (s *Store) GetAttendanceDailyRecord(execCtx context.Context, tenantID, employeeID, workDate, source string) (domain.AttendanceDailyRecord, bool, error) {
+	date, err := requiredDate(workDate)
+	if err != nil {
+		return domain.AttendanceDailyRecord{}, false, err
+	}
+	v, err := s.q.GetAttendanceDailyRecord(tenantContext(execCtx, tenantID), sqlc.GetAttendanceDailyRecordParams{
+		TenantID: tenantID, EmployeeID: employeeID, WorkDate: date, Source: source,
+	})
+	if isNotFound(err) {
+		return domain.AttendanceDailyRecord{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceDailyRecord{}, false, err
+	}
+	return fromAttendanceDailyRecord(v), true, nil
+}
+
+func (s *Store) ListAttendanceDailyRecords(execCtx context.Context, tenantID string, employeeIDs []string, fromDate, toDate, source string) ([]domain.AttendanceDailyRecord, error) {
+	items, err := s.q.ListAttendanceDailyRecords(tenantContext(execCtx, tenantID), sqlc.ListAttendanceDailyRecordsParams{
+		TenantID: tenantID, EmployeeIds: textArray(employeeIDs), FromDate: fromDate, ToDate: toDate, Source: source,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromAttendanceDailySummary), nil
+	return mapSlice(items, fromAttendanceDailyRecord), nil
+}
+
+func (s *Store) DeleteAttendanceDailyLeaveSegments(execCtx context.Context, tenantID, employeeID, workDate string) error {
+	date, err := requiredDate(workDate)
+	if err != nil {
+		return err
+	}
+	return s.q.DeleteAttendanceDailyLeaveSegments(tenantContext(execCtx, tenantID), sqlc.DeleteAttendanceDailyLeaveSegmentsParams{
+		TenantID: tenantID, EmployeeID: employeeID, WorkDate: date,
+	})
+}
+
+func (s *Store) UpsertAttendanceDailyLeaveSegment(execCtx context.Context, v domain.AttendanceDailyLeaveSegment) error {
+	workDate, err := requiredDate(v.WorkDate)
+	if err != nil {
+		return err
+	}
+	_, err = s.q.UpsertAttendanceDailyLeaveSegment(tenantContext(execCtx, v.TenantID), sqlc.UpsertAttendanceDailyLeaveSegmentParams{
+		TenantID: v.TenantID, EmployeeID: v.EmployeeID, WorkDate: workDate,
+		DailySource: v.DailySource, SegmentNo: int16(v.SegmentNo), LeaveTypeID: nullableText(v.LeaveTypeID),
+		SourceLeaveType: v.SourceLeaveType, StartAt: nullableTimestamptz(v.StartAt),
+		EndAt: nullableTimestamptz(v.EndAt), Minutes: int32(v.Minutes), Counted: v.Counted,
+		TimeInferred: v.TimeInferred, LeaveRecordID: nullableText(v.LeaveRecordID),
+		LinkStatus: v.LinkStatus, MatchBasis: v.MatchBasis,
+		CandidateRecordIds: textArray(v.CandidateRecordIDs), Payload: mustJSON(v.Payload),
+		CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) ListAttendanceDailyLeaveSegments(execCtx context.Context, tenantID, employeeID, fromDate, toDate string) ([]domain.AttendanceDailyLeaveSegment, error) {
+	items, err := s.q.ListAttendanceDailyLeaveSegments(tenantContext(execCtx, tenantID), sqlc.ListAttendanceDailyLeaveSegmentsParams{
+		TenantID: tenantID, EmployeeID: employeeID, FromDate: fromDate, ToDate: toDate,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceDailyLeaveSegment), nil
+}
+
+func (s *Store) UpsertAttendanceDailyReconciliation(execCtx context.Context, v domain.AttendanceDailyReconciliation) error {
+	workDate, err := requiredDate(v.WorkDate)
+	if err != nil {
+		return err
+	}
+	_, err = s.q.UpsertAttendanceDailyReconciliation(tenantContext(execCtx, v.TenantID), sqlc.UpsertAttendanceDailyReconciliationParams{
+		TenantID: v.TenantID, EmployeeID: v.EmployeeID, WorkDate: workDate,
+		LocalFingerprint: v.LocalFingerprint, EhrmsFingerprint: v.EHRMSFingerprint,
+		Status: v.Status, Differences: mustJSON(v.Differences), ResolutionStatus: v.ResolutionStatus,
+		ResolvedByAccountID: nullableText(v.ResolvedByAccountID), ResolvedAt: nullableTimestamptz(v.ResolvedAt),
+		CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendanceDailyReconciliation(execCtx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDailyReconciliation, bool, error) {
+	date, err := requiredDate(workDate)
+	if err != nil {
+		return domain.AttendanceDailyReconciliation{}, false, err
+	}
+	v, err := s.q.GetAttendanceDailyReconciliation(tenantContext(execCtx, tenantID), sqlc.GetAttendanceDailyReconciliationParams{
+		TenantID: tenantID, EmployeeID: employeeID, WorkDate: date,
+	})
+	if isNotFound(err) {
+		return domain.AttendanceDailyReconciliation{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceDailyReconciliation{}, false, err
+	}
+	return fromAttendanceDailyReconciliation(v), true, nil
+}
+
+func (s *Store) ListEHRMSLeaveRecordCandidates(execCtx context.Context, tenantID, employeeID, leaveTypeID string, fromAt, toAt time.Time) ([]domain.LeaveRecord, error) {
+	items, err := s.q.ListEHRMSLeaveRecordCandidates(tenantContext(execCtx, tenantID), sqlc.ListEHRMSLeaveRecordCandidatesParams{
+		TenantID: tenantID, EmployeeID: employeeID, LeaveTypeID: leaveTypeID,
+		FromAt: timestamptz(fromAt), ToAt: timestamptz(toAt),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromLeaveRecord), nil
 }
 
 func (s *Store) UpsertAttendanceDayProjection(execCtx context.Context, v domain.AttendanceDayProjection) error {
@@ -2867,6 +2992,39 @@ func (s *Store) DeletePlatformTaskTodo(execCtx context.Context, tenantID, accoun
 
 // UpsertAgentRun 從儲存層處理 upsert agent 執行。
 func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error {
+	if strings.TrimSpace(v.InputMessageID) != "" {
+		rowsAffected, err := s.q.UpsertAgentChatExecution(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentChatExecutionParams{
+			ID:                v.ID,
+			TenantID:          v.TenantID,
+			AccountID:         v.AccountID,
+			AgentID:           v.AgentID,
+			AgentRevisionID:   v.AgentRevisionID,
+			ModelConnectionID: v.ModelConnectionID,
+			Mode:              v.Mode,
+			Status:            v.Status,
+			CreatedAt:         timestamptz(v.CreatedAt),
+			UpdatedAt:         timestamptz(v.UpdatedAt),
+			ErrorCode:         v.ErrorCode,
+			ErrorCategory:     v.ErrorCategory,
+			SafeErrorMessage:  v.Answer,
+			LlmCallCount:      v.LLMCallCount,
+			InputTokens:       v.InputTokens,
+			CachedTokens:      v.CachedTokens,
+			OutputTokens:      v.OutputTokens,
+			TotalTokens:       v.TotalTokens,
+			UsageComplete:     v.UsageComplete,
+			InputMessageID:    v.InputMessageID,
+			SessionID:         v.SessionID,
+			SegmentID:         v.SegmentID,
+		})
+		if err != nil {
+			return err
+		}
+		if rowsAffected == 0 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	}
 	_, err := s.q.UpsertAgentRun(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentRunParams{
 		ID:             v.ID,
 		TenantID:       v.TenantID,
@@ -3123,23 +3281,103 @@ func (s *Store) UpsertAgentDefinition(execCtx context.Context, v domain.AgentDef
 		Category:                      string(v.Category),
 		ModelID:                       v.ModelID,
 		MainAgentRole:                 v.MainAgentRole,
-		SubAgents:                     string(mustJSON(v.SubAgents)),
+		SubAgents:                     string(agentTeamMembersJSON(v.SubAgents)),
 		SystemPrompt:                  v.SystemPrompt,
 		WelcomeMessage:                v.WelcomeMessage,
-		SuggestedQuestions:            mustJSON(v.SuggestedQuestions),
-		SuggestedQuestionTranslations: mustJSON(v.SuggestedQuestionTranslations),
-		Tools:                         string(mustJSON(v.Tools)),
-		ExternalToolIds:               string(mustJSON(v.ExternalToolIDs)),
-		KnowledgeBaseIds:              string(mustJSON(v.KnowledgeBaseIDs)),
+		SuggestedQuestions:            collectionJSON(v.SuggestedQuestions),
+		SuggestedQuestionTranslations: collectionJSON(v.SuggestedQuestionTranslations),
+		Tools:                         string(collectionJSON(v.Tools)),
+		ExternalToolIds:               string(collectionJSON(v.ExternalToolIDs)),
+		KnowledgeBaseIds:              string(collectionJSON(v.KnowledgeBaseIDs)),
 		Visibility:                    string(v.Visibility),
-		VisibilityTargets:             mustJSON(v.VisibilityTargets),
+		VisibilityTargets:             collectionJSON(v.VisibilityTargets),
 		TimeoutSeconds:                int32(v.TimeoutSeconds),
 		Version:                       int32(v.Version),
 		CreatedByAccountID:            nullableText(v.CreatedByAccountID),
 		CreatedAt:                     timestamptz(v.CreatedAt),
 		UpdatedAt:                     timestamptz(v.UpdatedAt),
 	})
+	if isNotFound(err) {
+		// PostgreSQL data-modifying CTEs share one snapshot: the final UPDATE
+		// cannot see a root Agent inserted earlier in the same statement. The
+		// shell Agent, revision and bindings are already written, so link their
+		// revision pointers in a follow-up statement within the same transaction.
+		return s.reconcileAgentDefinitionRevisionPointers(execCtx, v)
+	}
 	return err
+}
+
+func (s *Store) reconcileAgentDefinitionRevisionPointers(execCtx context.Context, v domain.AgentDefinition) error {
+	execCtx = tenantContext(execCtx, v.TenantID)
+	tag, err := s.db.Exec(execCtx, `
+WITH root_revision AS (
+    SELECT id
+    FROM agent_revisions
+    WHERE tenant_id = $1
+      AND agent_id = $2
+      AND revision_no = $3
+)
+UPDATE agents
+SET draft_revision_id = root_revision.id,
+    published_revision_id = NULLIF($4, ''),
+    updated_at = $5
+FROM root_revision
+WHERE agents.tenant_id = $1
+  AND agents.id = $2
+`, v.TenantID, v.ID, v.Version, v.PublishedRevisionID, v.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	_, err = s.db.Exec(execCtx, `
+UPDATE agents AS child
+SET draft_revision_id = revision.id,
+    published_revision_id = (
+        SELECT published_child.id
+        FROM agent_revisions AS published_root
+        JOIN agent_revisions AS published_child
+          ON published_child.tenant_id = published_root.tenant_id
+         AND published_child.agent_id = child.id
+         AND published_child.revision_no = published_root.revision_no
+        WHERE published_root.tenant_id = child.tenant_id
+          AND published_root.id = NULLIF($4, '')
+    ),
+    updated_at = $5
+FROM agent_revisions AS revision
+WHERE child.tenant_id = $1
+  AND child.parent_agent_id = $2
+  AND revision.tenant_id = child.tenant_id
+  AND revision.agent_id = child.id
+  AND revision.revision_no = $3
+`, v.TenantID, v.ID, v.Version, v.PublishedRevisionID, v.UpdatedAt)
+	return err
+}
+
+// ClaimAgentDefinitionRevision 原子校驗草稿版本，並在需要時保留下一個修訂號。
+func (s *Store) ClaimAgentDefinitionRevision(
+	execCtx context.Context,
+	tenantID, id string,
+	expectedVersion int,
+	createRevision bool,
+) (int, bool, error) {
+	version, err := s.q.ClaimAgentDefinitionRevision(
+		tenantContext(execCtx, tenantID),
+		sqlc.ClaimAgentDefinitionRevisionParams{
+			CreateRevision:  createRevision,
+			TenantID:        tenantID,
+			ID:              id,
+			ExpectedVersion: int32(expectedVersion),
+		},
+	)
+	if isNotFound(err) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return int(version), true, nil
 }
 
 // GetAgentDefinition 從儲存層取得 agent 定義。
@@ -3225,12 +3463,12 @@ func (s *Store) InsertAgentDefinitionVersion(execCtx context.Context, v domain.A
 		Emoji:                         v.Emoji,
 		Category:                      string(v.Category),
 		Visibility:                    string(v.Visibility),
-		VisibilityTargets:             mustJSON(v.VisibilityTargets),
+		VisibilityTargets:             collectionJSON(v.VisibilityTargets),
 		MainAgentRole:                 v.MainAgentRole,
 		SystemPrompt:                  v.SystemPrompt,
 		WelcomeMessage:                v.WelcomeMessage,
-		SuggestedQuestions:            mustJSON(v.SuggestedQuestions),
-		SuggestedQuestionTranslations: mustJSON(v.SuggestedQuestionTranslations),
+		SuggestedQuestions:            collectionJSON(v.SuggestedQuestions),
+		SuggestedQuestionTranslations: collectionJSON(v.SuggestedQuestionTranslations),
 		ModelID:                       v.ModelID,
 		ModelConfigChecksum:           v.ModelConfigChecksum,
 		TimeoutSeconds:                int32(v.TimeoutSeconds),
@@ -3239,11 +3477,16 @@ func (s *Store) InsertAgentDefinitionVersion(execCtx context.Context, v domain.A
 		Note:                          v.Note,
 		CreatedByAccountID:            nullableText(v.CreatedByAccountID),
 		CreatedAt:                     timestamptz(v.CreatedAt),
-		SubAgents:                     mustJSON(v.SubAgents),
-		Tools:                         mustJSON(v.Tools),
-		ExternalToolIds:               mustJSON(v.ExternalToolIDs),
-		KnowledgeBaseIds:              mustJSON(v.KnowledgeBaseIDs),
+		SubAgents:                     agentTeamMembersJSON(v.SubAgents),
+		Tools:                         collectionJSON(v.Tools),
+		ExternalToolIds:               collectionJSON(v.ExternalToolIDs),
+		KnowledgeBaseIds:              collectionJSON(v.KnowledgeBaseIDs),
 	})
+	if isNotFound(err) {
+		// UpsertAgentDefinition may have atomically persisted the same revision.
+		// Treat the conflict-safe INSERT ... DO NOTHING as an idempotent success.
+		return nil
+	}
 	return err
 }
 
@@ -3975,6 +4218,31 @@ func mustJSON(v any) []byte {
 	return jsoncodec.Must(v)
 }
 
+func collectionJSON[T any](items []T) []byte {
+	if items == nil {
+		items = []T{}
+	}
+	return mustJSON(items)
+}
+
+func agentTeamMembersJSON(items []domain.AgentTeamMember) []byte {
+	normalized := make([]domain.AgentTeamMember, len(items))
+	copy(normalized, items)
+	for index := range normalized {
+		member := &normalized[index]
+		if member.Tools == nil {
+			member.Tools = []string{}
+		}
+		if member.ExternalToolIDs == nil {
+			member.ExternalToolIDs = []string{}
+		}
+		if member.KnowledgeBaseIDs == nil {
+			member.KnowledgeBaseIDs = []string{}
+		}
+	}
+	return mustJSON(normalized)
+}
+
 func jsonBytes(v any) []byte {
 	switch value := v.(type) {
 	case nil:
@@ -4451,6 +4719,8 @@ func fromEmployee(v sqlc.Employee) domain.Employee {
 		ID:                    v.ID,
 		TenantID:              v.TenantID,
 		EmployeeNo:            v.EmployeeNo,
+		ExternalSource:        v.ExternalSource,
+		ExternalEmployeeID:    v.ExternalEmployeeID,
 		Name:                  v.Name,
 		CompanyEmail:          v.CompanyEmail,
 		PersonalEmail:         v.PersonalEmail,
@@ -4472,6 +4742,9 @@ func fromEmployee(v sqlc.Employee) domain.Employee {
 		ContactInfo:           jsonMap(v.ContactInfo),
 		InsuranceInfo:         jsonMap(v.InsuranceInfo),
 		InternalExperiences:   jsonEmployeeExperiences(v.InternalExperiences),
+		SourcePayload:         jsonMap(v.SourcePayload),
+		SourceUpdatedAt:       timePtrFrom(v.SourceUpdatedAt),
+		LastSyncedAt:          timePtrFrom(v.LastSyncedAt),
 		CreatedAt:             timeFrom(v.CreatedAt),
 		UpdatedAt:             timeFrom(v.UpdatedAt),
 	}
@@ -4529,6 +4802,8 @@ func fromLeaveBalance(v sqlc.LeaveBalance, leaveTypes ...string) domain.LeaveBal
 		LeaveTypeID: v.LeaveTypeID, EntitlementYear: int(v.EntitlementYear),
 		GrantedMinutes: int(v.GrantedMinutes), UsedMinutes: int(v.UsedMinutes),
 		RemainingMinutes: int(v.RemainingMinutes), Source: v.Source,
+		SourcePayload:            jsonMap(v.SourcePayload),
+		SourceUpdatedAt:          timePtrFrom(v.SourceUpdatedAt),
 		LastSyncedAt:             timePtrFrom(v.LastSyncedAt),
 		SnapshotRemainingMinutes: int(v.RemainingMinutes),
 		UpdatedAt:                timeFrom(v.UpdatedAt),
@@ -4547,10 +4822,13 @@ func fromLeaveBalanceEntry(v sqlc.LeaveBalanceEntry) domain.LeaveBalanceEntry {
 func fromLeaveRecord(v sqlc.LeaveRecord) domain.LeaveRecord {
 	return domain.LeaveRecord{
 		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
-		BalanceID: v.BalanceID, EntitlementYear: int(v.EntitlementYear), Source: v.Source,
-		EventDate: timeFrom(v.EventDate), StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt),
+		BalanceID: textFrom(v.BalanceID), EntitlementYear: int(v.EntitlementYear), Source: v.Source,
+		ExternalRef: v.ExternalRef,
+		EventDate:   timeFrom(v.EventDate), StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt),
 		NetMinutes: int(v.NetMinutes), Remark: v.Remark, Status: v.Status,
 		MatchedRecordID: textFrom(v.MatchedRecordID), ReconciliationStatus: v.ReconciliationStatus,
+		BalanceMatchStatus: v.BalanceMatchStatus, BalanceMatchReason: v.BalanceMatchReason,
+		SourcePayload: jsonMap(v.SourcePayload), SourceUpdatedAt: timePtrFrom(v.SourceUpdatedAt),
 		LastSeenAt: timePtrFrom(v.LastSeenAt), DeletedAt: timePtrFrom(v.DeletedAt), UpdatedAt: timeFrom(v.UpdatedAt),
 	}
 }
@@ -4600,24 +4878,39 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 	}
 }
 
-// fromAttendanceDailySummary 轉換考勤日彙總。
-func fromAttendanceDailySummary(v sqlc.AttendanceDailySummary) domain.AttendanceDailySummary {
-	return domain.AttendanceDailySummary{
-		TenantID:    v.TenantID,
-		EmployeeID:  v.EmployeeID,
-		WorkDate:    dateTextFrom(v.WorkDate),
-		ShiftStart:  v.ShiftStart,
-		ShiftEnd:    v.ShiftEnd,
-		ShiftHours:  v.ShiftHours,
-		DailyHours:  v.DailyHours,
-		ClockHours:  v.ClockHours,
-		ClockStart:  v.ClockStart,
-		ClockEnd:    v.ClockEnd,
-		Payload:     jsonMap(v.Payload),
-		Source:      v.Source,
-		ExternalRef: v.ExternalRef,
-		CreatedAt:   timeFrom(v.CreatedAt),
-		UpdatedAt:   timeFrom(v.UpdatedAt),
+func fromAttendanceDailyRecord(v sqlc.AttendanceDailyRecord) domain.AttendanceDailyRecord {
+	return domain.AttendanceDailyRecord{
+		TenantID: v.TenantID, EmployeeID: v.EmployeeID, WorkDate: dateTextFrom(v.WorkDate), Source: v.Source,
+		ScheduledStartAt: timePtrFrom(v.ScheduledStartAt), ScheduledEndAt: timePtrFrom(v.ScheduledEndAt),
+		ScheduledMinutes: int(v.ScheduledMinutes), RequiredMinutes: int(v.RequiredMinutes),
+		WorkedMinutes: int(v.WorkedMinutes), CreditedLeaveMinutes: int(v.CreditedLeaveMinutes),
+		OvertimeMinutes: int(v.OvertimeMinutes), ClockInAt: timePtrFrom(v.ClockInAt), ClockOutAt: timePtrFrom(v.ClockOutAt),
+		ClockInRecordID: textFrom(v.ClockInRecordID), ClockOutRecordID: textFrom(v.ClockOutRecordID),
+		PunchCount: int(v.PunchCount), DayStatus: v.DayStatus, AnomalyReasons: utils.CopyStrings(v.AnomalyReasons),
+		InputFingerprint: v.InputFingerprint, ExternalRef: v.ExternalRef, Payload: jsonMap(v.Payload),
+		CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromAttendanceDailyLeaveSegment(v sqlc.AttendanceDailyLeaveSegment) domain.AttendanceDailyLeaveSegment {
+	return domain.AttendanceDailyLeaveSegment{
+		TenantID: v.TenantID, EmployeeID: v.EmployeeID, WorkDate: dateTextFrom(v.WorkDate),
+		DailySource: v.DailySource, SegmentNo: int(v.SegmentNo), LeaveTypeID: textFrom(v.LeaveTypeID),
+		SourceLeaveType: v.SourceLeaveType, StartAt: timePtrFrom(v.StartAt), EndAt: timePtrFrom(v.EndAt),
+		Minutes: int(v.Minutes), Counted: v.Counted, TimeInferred: v.TimeInferred,
+		LeaveRecordID: textFrom(v.LeaveRecordID), LinkStatus: v.LinkStatus, MatchBasis: v.MatchBasis,
+		CandidateRecordIDs: utils.CopyStrings(v.CandidateRecordIds), Payload: jsonMap(v.Payload),
+		CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromAttendanceDailyReconciliation(v sqlc.AttendanceDailyReconciliation) domain.AttendanceDailyReconciliation {
+	return domain.AttendanceDailyReconciliation{
+		TenantID: v.TenantID, EmployeeID: v.EmployeeID, WorkDate: dateTextFrom(v.WorkDate),
+		LocalFingerprint: v.LocalFingerprint, EHRMSFingerprint: v.EhrmsFingerprint,
+		Status: v.Status, Differences: jsonMap(v.Differences), ResolutionStatus: v.ResolutionStatus,
+		ResolvedByAccountID: textFrom(v.ResolvedByAccountID), ResolvedAt: timePtrFrom(v.ResolvedAt),
+		CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
 	}
 }
 

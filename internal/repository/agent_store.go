@@ -25,6 +25,7 @@ type AgentStore interface {
 	ListAgentExternalTools(ctx context.Context, tenantID string) ([]domain.AgentExternalTool, error)
 	DeleteAgentExternalTool(ctx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error)
 	UpsertAgentDefinition(context.Context, domain.AgentDefinition) error
+	ClaimAgentDefinitionRevision(ctx context.Context, tenantID, id string, expectedVersion int, createRevision bool) (int, bool, error)
 	GetAgentDefinition(ctx context.Context, tenantID, id string) (domain.AgentDefinition, bool, error)
 	ListAgentDefinitions(ctx context.Context, tenantID string) ([]domain.AgentDefinition, error)
 	ListPublishedAgentDefinitions(ctx context.Context, tenantID string) ([]domain.AgentDefinition, error)

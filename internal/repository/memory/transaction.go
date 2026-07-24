@@ -58,7 +58,9 @@ func (s *Store) cloneLocked() *Store {
 		leaveRequests:              cloneNestedMap(s.leaveRequests, copyLeaveRequest),
 		attendanceWorksites:        cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
 		attendanceClockRecords:     cloneNestedMap(s.attendanceClockRecords, copyAttendanceClockRecord),
-		attendanceSummaries:        cloneNestedMap(s.attendanceSummaries, copyAttendanceDailySummary),
+		attendanceDailyRecords:     cloneNestedMap(s.attendanceDailyRecords, copyAttendanceDailyRecord),
+		attendanceLeaveSegments:    cloneNestedMap(s.attendanceLeaveSegments, copyAttendanceDailyLeaveSegment),
+		attendanceReconciliations:  cloneNestedMap(s.attendanceReconciliations, copyAttendanceDailyReconciliation),
 		attendanceDayProjections:   cloneNestedMap(s.attendanceDayProjections, copyAttendanceDayProjection),
 		attendanceCorrections:      cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
 		overtimeRequests:           cloneNestedMap(s.overtimeRequests, copyOvertimeRequest),
@@ -132,7 +134,9 @@ func (s *Store) replaceLocked(next *Store) {
 	s.leaveRequests = next.leaveRequests
 	s.attendanceWorksites = next.attendanceWorksites
 	s.attendanceClockRecords = next.attendanceClockRecords
-	s.attendanceSummaries = next.attendanceSummaries
+	s.attendanceDailyRecords = next.attendanceDailyRecords
+	s.attendanceLeaveSegments = next.attendanceLeaveSegments
+	s.attendanceReconciliations = next.attendanceReconciliations
 	s.attendanceDayProjections = next.attendanceDayProjections
 	s.attendanceCorrections = next.attendanceCorrections
 	s.overtimeRequests = next.overtimeRequests

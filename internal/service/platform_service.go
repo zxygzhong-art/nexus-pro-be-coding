@@ -29,27 +29,6 @@ func (c *Service) Platform() PlatformService {
 	return PlatformService{Service: c}
 }
 
-// Home 處理首頁的服務流程。
-func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) {
-	ClockSummary, err := c.authorizedClockSummary(ctx)
-	if err != nil {
-		return PlatformHomeResponse{}, err
-	}
-	assistants, err := c.publishedPlatformAssistants(ctx, 6, PlatformAssistantsQuery{})
-	if err != nil {
-		return PlatformHomeResponse{}, err
-	}
-	formColumns, err := c.platformFormCategories(ctx)
-	if err != nil {
-		return PlatformHomeResponse{}, err
-	}
-	return PlatformHomeResponse{
-		Assistants:   assistants,
-		FormColumns:  platformHomeFormColumns(formColumns),
-		ClockSummary: ClockSummary,
-	}, nil
-}
-
 // authorizedClockSummary projects the optional clock widget only when the caller can read their clock state.
 func (c PlatformService) authorizedClockSummary(ctx RequestContext) (*PlatformClockSummary, error) {
 	account, _, err := c.resolveAccount(ctx)
@@ -1306,17 +1285,6 @@ func platformAssistantMessages() []PlatformChatMessage {
 	return []PlatformChatMessage{
 		{ID: "m1", Role: "assistant", Avatar: "🤖", Content: "哈囉！告訴我你想處理的事情，我能幫你挑選最合適的助理。"},
 	}
-}
-
-// platformHomeFormColumns 處理平臺首頁表單 columns。
-func platformHomeFormColumns(columns []PlatformFormColumn) []PlatformFormColumn {
-	limit := len(columns)
-	if limit > 2 {
-		limit = 2
-	}
-	result := make([]PlatformFormColumn, limit)
-	copy(result, columns[:limit])
-	return result
 }
 
 // platformFormCategories 依租戶已啟用範本組裝表單分類。

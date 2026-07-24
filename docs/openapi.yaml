@@ -24,20 +24,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/home:
-    get:
-      summary: Get OA workbench home aggregates
-      responses:
-        "200":
-          description: Home assistants, forms, and clock summary
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformHomeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
   /v1/platform/assistants:
     get:
       summary: List OA assistant cards
@@ -1377,7 +1363,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/ehrms/sync:
     post:
-      summary: Sync attendance daily summaries from configured eHRMS
+      summary: Sync attendance, leave types, leave balances, and leave details from configured eHRMS
       requestBody:
         required: false
         content:
@@ -1386,7 +1372,7 @@ paths:
               $ref: "#/components/schemas/EHRMSAttendanceSyncRequest"
       responses:
         "200":
-          description: eHRMS attendance sync summary
+          description: Unified eHRMS attendance and leave sync summary
           content:
             application/json:
               schema:
@@ -2103,6 +2089,21 @@ paths:
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/agents/{id}:
+    get:
+      summary: Get workspace agent detail and version history
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Agent definition detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
     patch:
       summary: Update workspace agent
       parameters:
@@ -2119,6 +2120,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
     delete:
       summary: Delete workspace agent
@@ -3543,6 +3545,7 @@ components:
         visibility: {type: string, enum: [all, department, role]}
         visibility_targets: {type: array, items: {type: string}}
         timeout_seconds: {type: integer, minimum: 1}
+        expected_version: {type: integer, minimum: 1, description: Current draft version used for optimistic concurrency control.}
         version_note: {type: string}
     AgentDefinitionVersion:
       type: object
@@ -4929,12 +4932,6 @@ components:
         role: {type: string}
         time: {type: string, format: date-time}
         comment: {type: string}
-    PlatformHomeDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/PlatformHomeResponse"
     PlatformAssistantsDataResponse:
       type: object
       required: [data]
@@ -5013,19 +5010,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/PlatformInsightsResponse"
-    PlatformHomeResponse:
-      type: object
-      required: [assistants, form_columns]
-      additionalProperties: true
-      properties:
-        assistants:
-          type: array
-          items: {$ref: "#/components/schemas/PlatformAssistant"}
-        form_columns:
-          type: array
-          items: {$ref: "#/components/schemas/PlatformFormColumn"}
-        clock_summary:
-          $ref: "#/components/schemas/PlatformClockSummary"
     PlatformAssistant:
       type: object
       required: [id, emoji, title, desc, welcome_message, suggested_questions, runnable]
@@ -5373,6 +5357,11 @@ components:
         source_id: {type: string}
         value_field: {type: string}
         label_field: {type: string}
+        filters:
+          type: object
+          additionalProperties:
+            type: array
+            items: {type: string}
     PlatformFormBuilderFieldOption:
       type: object
       required: [value, label]
@@ -5617,6 +5606,7 @@ components:
         source: {type: string, description: Entitlement snapshot source; leave quotas synchronized from eHRMS use ehrms}
         external_leave_code: {type: string}
         external_category_code: {type: string}
+        source_updated_at: {type: string, format: date-time}
         last_synced_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     LeaveBalancePageDataResponse:
@@ -6291,7 +6281,7 @@ components:
           items: {type: string}
     AttendanceMonthlySummary:
       type: object
-      required: [employee_id, month, attendance_days, worked_minutes, record_count, abnormal_days, days]
+      required: [employee_id, month, attendance_days, worked_minutes, record_count, abnormal_days, leave_days, overtime_hours, days]
       properties:
         employee_id: {type: string}
         month: {type: string, pattern: '^\d{4}-\d{2}$'}
@@ -6299,6 +6289,8 @@ components:
         worked_minutes: {type: integer, minimum: 0}
         record_count: {type: integer, minimum: 0}
         abnormal_days: {type: integer, minimum: 0}
+        leave_days: {type: number, minimum: 0}
+        overtime_hours: {type: number, minimum: 0}
         days:
           type: array
           items:
@@ -6443,6 +6435,14 @@ components:
           enum: [create, update, upsert]
           default: upsert
           description: create rejects existing employee/date summaries, update rejects missing summaries, upsert creates or updates by employee/date.
+        start:
+          type: string
+          format: date
+          description: Inclusive start date. When both start and end are omitted, the current Asia/Shanghai date is used.
+        end:
+          type: string
+          format: date
+          description: Exclusive end date. It must be provided with start and be later than start.
     BatchDeleteEmployeesRequest:
       type: object
       required: [employee_ids, reason]
@@ -6649,6 +6649,10 @@ components:
           properties:
             id: {type: string}
             tenant_id: {type: string}
+            external_source: {type: string}
+            external_employee_id: {type: string}
+            source_updated_at: {type: string, format: date-time}
+            last_synced_at: {type: string, format: date-time}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
     PositionInput:
@@ -7109,6 +7113,9 @@ components:
         updated: {type: integer}
         skipped: {type: integer}
         failed: {type: integer}
+        leave_types_fetched: {type: integer}
+        leave_types_upserted: {type: integer}
+        leave_types_deactivated: {type: integer}
         leave_balances_fetched: {type: integer}
         leave_balances_upserted: {type: integer}
         leave_balances_skipped: {type: integer}
@@ -7118,8 +7125,10 @@ components:
         leave_details_updated: {type: integer}
         leave_details_skipped: {type: integer}
         leave_details_failed: {type: integer}
+        leave_details_unmatched: {type: integer}
         mode: {type: string, enum: [create, update, upsert]}
-        start: {type: string, format: date, description: January 1 of the current year used for per-employee upstream queries.}
+        start: {type: string, format: date, description: Inclusive start date used for per-employee upstream queries.}
+        end: {type: string, format: date, description: Exclusive end date used for per-employee upstream queries.}
         results:
           type: array
           items:

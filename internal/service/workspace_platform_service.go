@@ -510,7 +510,7 @@ func (c WorkspaceService) Insights(ctx RequestContext, query PlatformInsightsQue
 	}
 	return PlatformInsightsResponse{
 		Month:   overview.Month,
-		Reports: c.insightReports(overview, attendance),
+		Reports: c.insightReports(attendance),
 		AIPanel: PlatformInsightsAIPanel{
 			Messages: []PlatformChatMessage{
 				{ID: "im1", Role: "assistant", Avatar: "🤖", Content: "已根據目前後端資料產生人力與出勤報表摘要；業務與財務資料源尚未接入。"},
@@ -530,21 +530,22 @@ func workspaceOverviewQueryFromInsightMonth(month string) WorkspaceOverviewQuery
 }
 
 // insightReports 處理 insight reports 的服務流程。
-func (c WorkspaceService) insightReports(overview WorkspaceOverviewResponse, attendance WorkspaceAttendanceResponse) map[string]any {
+func (c WorkspaceService) insightReports(attendance WorkspaceAttendanceResponse) map[string]any {
 	members, memberHours, leaveChart, totalHours := insightAttendanceMembers(attendance)
 	memberCount := len(members)
 	leaveDays := attendance.Attendance.Summary.LeaveHours / workspaceDayHours
-	hires := overview.HRSummary.Hires
-	separations := overview.HRSummary.Separations
+	averageHours := 0.0
+	if memberCount > 0 {
+		averageHours = math.Round(totalHours/float64(memberCount)*100) / 100
+	}
 	return map[string]any{
 		"dept_tasks": map[string]any{
 			"title": "部門工時與出勤摘要",
 			"metrics": []map[string]any{
-				{"id": "dept-total-hours", "label": "本月工時", "value": totalHours, "unit": "h", "variant": "primary"},
-				{"id": "leave-days", "label": "本月請假", "value": leaveDays, "unit": "天", "variant": "warning"},
-				{"id": "members", "label": "成員數", "value": memberCount, "unit": "人"},
-				{"id": "hires", "label": "本月新進", "value": hires, "unit": "人", "variant": "success"},
-				{"id": "separations", "label": "本月離職", "value": separations, "unit": "人", "variant": "warning"},
+				{"id": "dept-members", "label": "部門人數", "value": memberCount, "unit": "人"},
+				{"id": "dept-total-hours", "label": "部門總工時", "value": totalHours, "unit": "h", "variant": "primary"},
+				{"id": "dept-avg-hours", "label": "人均工時", "value": averageHours, "unit": "h"},
+				{"id": "dept-leave-days", "label": "請假天數", "value": leaveDays, "unit": "天", "variant": "warning"},
 			},
 			"leave_chart":           leaveChart,
 			"member_hours":          memberHours,

@@ -49,7 +49,9 @@ type Store struct {
 	leaveRequests              map[string]map[string]LeaveRequest
 	attendanceWorksites        map[string]map[string]AttendanceWorksite
 	attendanceClockRecords     map[string]map[string]AttendanceClockRecord
-	attendanceSummaries        map[string]map[string]AttendanceDailySummary
+	attendanceDailyRecords     map[string]map[string]AttendanceDailyRecord
+	attendanceLeaveSegments    map[string]map[string]AttendanceDailyLeaveSegment
+	attendanceReconciliations  map[string]map[string]AttendanceDailyReconciliation
 	attendanceDayProjections   map[string]map[string]AttendanceDayProjection
 	attendanceCorrections      map[string]map[string]AttendanceCorrectionRequest
 	overtimeRequests           map[string]map[string]OvertimeRequest
@@ -123,7 +125,9 @@ func NewStore() *Store {
 		leaveRequests:              map[string]map[string]LeaveRequest{},
 		attendanceWorksites:        map[string]map[string]AttendanceWorksite{},
 		attendanceClockRecords:     map[string]map[string]AttendanceClockRecord{},
-		attendanceSummaries:        map[string]map[string]AttendanceDailySummary{},
+		attendanceDailyRecords:     map[string]map[string]AttendanceDailyRecord{},
+		attendanceLeaveSegments:    map[string]map[string]AttendanceDailyLeaveSegment{},
+		attendanceReconciliations:  map[string]map[string]AttendanceDailyReconciliation{},
 		attendanceDayProjections:   map[string]map[string]AttendanceDayProjection{},
 		attendanceCorrections:      map[string]map[string]AttendanceCorrectionRequest{},
 		overtimeRequests:           map[string]map[string]OvertimeRequest{},
@@ -1307,14 +1311,24 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 	orgAllowed := memoryStringSet(query.Scope.OrgUnitIDs)
 	statusAllowed := memoryStringSet(query.Scope.Statuses)
 	accounts := map[string]Account{}
-	if keyword != "" {
+	permissionSets := map[string]PermissionSet{}
+	if keyword != "" || !query.IncludeSuperAdmins {
 		s.mu.RLock()
 		for id, account := range s.accounts[tenantID] {
 			accounts[id] = copyAccount(account)
 		}
+		if !query.IncludeSuperAdmins {
+			for id, set := range s.permissionSets[tenantID] {
+				permissionSets[id] = copyPermissionSet(set)
+			}
+		}
 		s.mu.RUnlock()
 	}
 	for _, item := range items {
+		account := accounts[item.AccountID]
+		if !query.IncludeSuperAdmins && memoryAccountIsSuperAdmin(account, permissionSets) {
+			continue
+		}
 		status := utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
 		employeeMatch := len(employeeAllowed) > 0
 		if employeeMatch {
@@ -1357,7 +1371,6 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 			continue
 		}
 		if keyword != "" {
-			account := accounts[item.AccountID]
 			haystack := strings.ToLower(strings.Join([]string{
 				item.Name,
 				item.CompanyEmail,
@@ -1376,6 +1389,21 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 		out = append(out, item)
 	}
 	return out
+}
+
+func memoryAccountIsSuperAdmin(account Account, permissionSets map[string]PermissionSet) bool {
+	for _, permissionSetID := range account.DirectPermissionSetIDs {
+		set, ok := permissionSets[permissionSetID]
+		if !ok {
+			continue
+		}
+		for _, permission := range set.Permissions {
+			if strings.TrimSpace(permission.Resource) == "*" && strings.TrimSpace(string(permission.Action)) == "*" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func memoryEmployeePresentInRange(item Employee, fromRaw, toRaw string) bool {
@@ -1955,6 +1983,12 @@ func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 func (s *Store) UpsertLeaveRecord(_ context.Context, v LeaveRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(v.BalanceMatchStatus) == "" {
+		v.BalanceMatchStatus = "unmatched"
+		if strings.TrimSpace(v.BalanceID) != "" {
+			v.BalanceMatchStatus = "matched"
+		}
+	}
 	putNested(s.leaveRecords, v.TenantID, v.ID, copyLeaveRecord(v))
 	return nil
 }
@@ -2197,33 +2231,25 @@ func (s *Store) ListAttendanceClockRecords(_ context.Context, tenantID string, q
 }
 
 // UpsertAttendanceDailySummary 從儲存層處理 upsert 考勤日彙總。
-func (s *Store) UpsertAttendanceDailySummary(_ context.Context, v AttendanceDailySummary) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := attendanceDailySummaryKey(v.EmployeeID, v.WorkDate)
-	for existingKey, item := range s.attendanceSummaries[v.TenantID] {
-		if existingKey != key && item.EmployeeID == v.EmployeeID && item.WorkDate == v.WorkDate {
-			return domain.Conflict("attendance daily summary already exists")
-		}
-		if existingKey != key && v.ExternalRef != "" && item.ExternalRef == v.ExternalRef {
-			return domain.Conflict("attendance daily summary external_ref already exists")
-		}
-	}
-	putNested(s.attendanceSummaries, v.TenantID, key, copyAttendanceDailySummary(v))
-	return nil
+func (s *Store) UpsertAttendanceDailySummary(execCtx context.Context, v AttendanceDailySummary) error {
+	return s.UpsertAttendanceDailyRecord(execCtx, domain.AttendanceDailyRecordFromSummary(v))
 }
 
 func attendanceDailySummaryKey(employeeID, workDate string) string {
 	return strings.TrimSpace(employeeID) + "|" + strings.TrimSpace(workDate)
 }
 
+func attendanceDailyRecordKey(employeeID, workDate, source string) string {
+	return attendanceDailySummaryKey(employeeID, workDate) + "|" + strings.TrimSpace(source)
+}
+
 // GetAttendanceDailySummaryByExternalRef 從儲存層取得考勤日彙總 by external ref。
 func (s *Store) GetAttendanceDailySummaryByExternalRef(_ context.Context, tenantID, externalRef string) (AttendanceDailySummary, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, item := range s.attendanceSummaries[tenantID] {
-		if item.ExternalRef == externalRef {
-			return copyAttendanceDailySummary(item), true, nil
+	for _, item := range s.attendanceDailyRecords[tenantID] {
+		if item.Source == "ehrms" && item.ExternalRef == externalRef {
+			return domain.AttendanceDailySummaryFromRecord(copyAttendanceDailyRecord(item)), true, nil
 		}
 	}
 	return AttendanceDailySummary{}, false, nil
@@ -2233,24 +2259,27 @@ func (s *Store) GetAttendanceDailySummaryByExternalRef(_ context.Context, tenant
 func (s *Store) GetAttendanceDailySummaryByEmployeeDate(_ context.Context, tenantID, employeeID, workDate string) (AttendanceDailySummary, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, item := range s.attendanceSummaries[tenantID] {
-		if item.EmployeeID == employeeID && item.WorkDate == workDate {
-			return copyAttendanceDailySummary(item), true, nil
-		}
+	item, ok := getNested(s.attendanceDailyRecords, tenantID, attendanceDailyRecordKey(employeeID, workDate, "ehrms"))
+	if !ok {
+		return AttendanceDailySummary{}, false, nil
 	}
-	return AttendanceDailySummary{}, false, nil
+	return domain.AttendanceDailySummaryFromRecord(copyAttendanceDailyRecord(item)), true, nil
 }
 
 // ListAttendanceDailySummaries 從儲存層列出考勤日彙總。
 func (s *Store) ListAttendanceDailySummaries(_ context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]AttendanceDailySummary, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]AttendanceDailySummary, 0, len(s.attendanceSummaries[tenantID]))
-	for _, item := range s.attendanceSummaries[tenantID] {
-		if !memoryAttendanceDailySummaryMatches(item, query) {
+	out := make([]AttendanceDailySummary, 0, len(s.attendanceDailyRecords[tenantID]))
+	for _, item := range s.attendanceDailyRecords[tenantID] {
+		if item.Source != "ehrms" {
 			continue
 		}
-		out = append(out, copyAttendanceDailySummary(item))
+		summary := domain.AttendanceDailySummaryFromRecord(item)
+		if !memoryAttendanceDailySummaryMatches(summary, query) {
+			continue
+		}
+		out = append(out, summary)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].WorkDate != out[j].WorkDate {
@@ -2259,6 +2288,174 @@ func (s *Store) ListAttendanceDailySummaries(_ context.Context, tenantID string,
 		return out[i].EmployeeID < out[j].EmployeeID
 	})
 	return out, nil
+}
+
+func (s *Store) UpsertAttendanceDailyRecord(_ context.Context, v AttendanceDailyRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := attendanceDailyRecordKey(v.EmployeeID, v.WorkDate, v.Source)
+	for existingKey, item := range s.attendanceDailyRecords[v.TenantID] {
+		if existingKey != key && v.Source == "ehrms" && v.ExternalRef != "" && item.ExternalRef == v.ExternalRef {
+			return domain.Conflict("attendance daily record external_ref already exists")
+		}
+	}
+	putNested(s.attendanceDailyRecords, v.TenantID, key, copyAttendanceDailyRecord(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceDailyRecord(_ context.Context, tenantID, employeeID, workDate, source string) (AttendanceDailyRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := getNested(s.attendanceDailyRecords, tenantID, attendanceDailyRecordKey(employeeID, workDate, source))
+	if !ok {
+		return AttendanceDailyRecord{}, false, nil
+	}
+	return copyAttendanceDailyRecord(item), true, nil
+}
+
+func (s *Store) ListAttendanceDailyRecords(_ context.Context, tenantID string, employeeIDs []string, fromDate, toDate, source string) ([]AttendanceDailyRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	employeeSet := make(map[string]struct{}, len(employeeIDs))
+	for _, employeeID := range employeeIDs {
+		employeeSet[employeeID] = struct{}{}
+	}
+	out := make([]AttendanceDailyRecord, 0)
+	for _, item := range s.attendanceDailyRecords[tenantID] {
+		if len(employeeSet) > 0 {
+			if _, ok := employeeSet[item.EmployeeID]; !ok {
+				continue
+			}
+		}
+		if fromDate != "" && item.WorkDate < fromDate || toDate != "" && item.WorkDate > toDate {
+			continue
+		}
+		if source != "" && item.Source != source {
+			continue
+		}
+		out = append(out, copyAttendanceDailyRecord(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WorkDate != out[j].WorkDate {
+			return out[i].WorkDate < out[j].WorkDate
+		}
+		if out[i].EmployeeID != out[j].EmployeeID {
+			return out[i].EmployeeID < out[j].EmployeeID
+		}
+		return out[i].Source < out[j].Source
+	})
+	return out, nil
+}
+
+func attendanceDailyLeaveSegmentKey(employeeID, workDate string, segmentNo int) string {
+	return attendanceDailySummaryKey(employeeID, workDate) + "|" + strconv.Itoa(segmentNo)
+}
+
+func (s *Store) DeleteAttendanceDailyLeaveSegments(_ context.Context, tenantID, employeeID, workDate string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, item := range s.attendanceLeaveSegments[tenantID] {
+		if item.EmployeeID == employeeID && item.WorkDate == workDate {
+			delete(s.attendanceLeaveSegments[tenantID], key)
+		}
+	}
+	return nil
+}
+
+func (s *Store) UpsertAttendanceDailyLeaveSegment(_ context.Context, v AttendanceDailyLeaveSegment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.attendanceDailyRecords[v.TenantID][attendanceDailyRecordKey(v.EmployeeID, v.WorkDate, v.DailySource)]; !ok {
+		return domain.BadRequest("attendance daily record is required")
+	}
+	if v.LeaveRecordID != "" {
+		if _, ok := s.leaveRecords[v.TenantID][v.LeaveRecordID]; !ok {
+			return domain.BadRequest("leave record was not found")
+		}
+	}
+	key := attendanceDailyLeaveSegmentKey(v.EmployeeID, v.WorkDate, v.SegmentNo)
+	putNested(s.attendanceLeaveSegments, v.TenantID, key, copyAttendanceDailyLeaveSegment(v))
+	return nil
+}
+
+func (s *Store) ListAttendanceDailyLeaveSegments(_ context.Context, tenantID, employeeID, fromDate, toDate string) ([]AttendanceDailyLeaveSegment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AttendanceDailyLeaveSegment, 0)
+	for _, item := range s.attendanceLeaveSegments[tenantID] {
+		if employeeID != "" && item.EmployeeID != employeeID {
+			continue
+		}
+		if fromDate != "" && item.WorkDate < fromDate {
+			continue
+		}
+		if toDate != "" && item.WorkDate > toDate {
+			continue
+		}
+		out = append(out, copyAttendanceDailyLeaveSegment(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WorkDate != out[j].WorkDate {
+			return out[i].WorkDate < out[j].WorkDate
+		}
+		if out[i].EmployeeID != out[j].EmployeeID {
+			return out[i].EmployeeID < out[j].EmployeeID
+		}
+		return out[i].SegmentNo < out[j].SegmentNo
+	})
+	return out, nil
+}
+
+func (s *Store) ListEHRMSLeaveRecordCandidates(_ context.Context, tenantID, employeeID, leaveTypeID string, fromAt, toAt time.Time) ([]LeaveRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]LeaveRecord, 0)
+	for _, item := range s.leaveRecords[tenantID] {
+		if item.Source != "ehrms" || item.Status != "active" || item.DeletedAt != nil {
+			continue
+		}
+		if item.EmployeeID != employeeID || item.LeaveTypeID != leaveTypeID {
+			continue
+		}
+		if !item.StartAt.Before(toAt) || !item.EndAt.After(fromAt) {
+			continue
+		}
+		out = append(out, copyLeaveRecord(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].StartAt.Equal(out[j].StartAt) {
+			return out[i].StartAt.Before(out[j].StartAt)
+		}
+		if !out[i].EndAt.Equal(out[j].EndAt) {
+			return out[i].EndAt.Before(out[j].EndAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (s *Store) UpsertAttendanceDailyReconciliation(_ context.Context, v AttendanceDailyReconciliation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := attendanceDailySummaryKey(v.EmployeeID, v.WorkDate)
+	if existing, ok := getNested(s.attendanceReconciliations, v.TenantID, key); ok &&
+		(existing.LocalFingerprint != v.LocalFingerprint || existing.EHRMSFingerprint != v.EHRMSFingerprint) {
+		v.ResolutionStatus = "unresolved"
+		v.ResolvedByAccountID = ""
+		v.ResolvedAt = nil
+	}
+	putNested(s.attendanceReconciliations, v.TenantID, key, copyAttendanceDailyReconciliation(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceDailyReconciliation(_ context.Context, tenantID, employeeID, workDate string) (AttendanceDailyReconciliation, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := getNested(s.attendanceReconciliations, tenantID, attendanceDailySummaryKey(employeeID, workDate))
+	if !ok {
+		return AttendanceDailyReconciliation{}, false, nil
+	}
+	return copyAttendanceDailyReconciliation(item), true, nil
 }
 
 func attendanceDayProjectionKey(employeeID, workDate string) string {
@@ -3452,6 +3649,26 @@ func (s *Store) UpsertAgentDefinition(_ context.Context, v AgentDefinition) erro
 	defer s.mu.Unlock()
 	putNested(s.agentDefinitions, v.TenantID, v.ID, copyAgentDefinition(v))
 	return nil
+}
+
+// ClaimAgentDefinitionRevision 原子校驗當前版本，並在需要時保留下一個修訂號。
+func (s *Store) ClaimAgentDefinitionRevision(
+	_ context.Context,
+	tenantID, id string,
+	expectedVersion int,
+	createRevision bool,
+) (int, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := getNested(s.agentDefinitions, tenantID, id)
+	if !ok || current.Version != expectedVersion {
+		return 0, false, nil
+	}
+	if createRevision {
+		current.Version++
+		putNested(s.agentDefinitions, tenantID, id, copyAgentDefinition(current))
+	}
+	return current.Version, true, nil
 }
 
 // GetAgentDefinition 從儲存層取得 agent 定義。

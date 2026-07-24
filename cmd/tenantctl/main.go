@@ -70,6 +70,7 @@ func runEnsureDefaultFormTemplates(args []string) error {
 	fs := flag.NewFlagSet("tenantctl ensure-default-form-templates", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	tenantID := fs.String("tenant-id", "", "tenant id to backfill")
+	keys := fs.String("keys", "", "comma-separated default form template keys; empty selects all")
 	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
 	if err := fs.Parse(args); err != nil {
@@ -94,11 +95,30 @@ func runEnsureDefaultFormTemplates(args []string) error {
 		return err
 	}
 	defer pool.Close()
-	created, err := service.New(postgresrepo.NewStore(pool)).EnsureTenantDefaultFormTemplates(ctx, *tenantID)
+	selectedKeys := splitCommaSeparated(*keys)
+	created, err := service.New(postgresrepo.NewStore(pool)).EnsureTenantDefaultFormTemplatesForKeys(ctx, *tenantID, selectedKeys)
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"tenant_id": strings.TrimSpace(*tenantID), "created": created})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"tenant_id": strings.TrimSpace(*tenantID),
+		"keys":      selectedKeys,
+		"created":   created,
+	})
+}
+
+func splitCommaSeparated(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
 }
 
 type temporalBackfillFormWorkflowsResult struct {
@@ -466,7 +486,7 @@ func runEHRMSSync(args []string) error {
 	fs.SetOutput(os.Stderr)
 	tenantID := fs.String("tenant-id", strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")), "tenant id")
 	accountID := fs.String("account-id", strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")), "service account id with org, employee, and attendance sync permissions")
-	mode := fs.String("mode", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_SYNC_MODE")), "upsert"), "sync mode: create, update, or upsert")
+	mode := fs.String("mode", jobs.ScheduledEHRMSSyncMode, "sync mode: create, update, or upsert")
 	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 10*time.Minute, "operation timeout")
 	if err := fs.Parse(args); err != nil {
@@ -511,7 +531,6 @@ func runEHRMSSync(args []string) error {
 	if err != nil {
 		return err
 	}
-	ehrmsClient.WithRequestInterval(cfg.EHRMSRequestInterval)
 	svc := service.New(postgresrepo.NewStore(pool), service.Options{
 		Logger:        logger,
 		Relationships: checker,
@@ -636,7 +655,7 @@ func printUsage(out *os.File) {
 	fmt.Fprintln(out, `Usage:
 	  tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --keycloak-sub <subject>
 	  tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --provision-keycloak
-	  tenantctl ensure-default-form-templates --tenant-id <id>
+	  tenantctl ensure-default-form-templates --tenant-id <id> [--keys <key,key,...>]
   tenantctl openfga-backfill --tenant-id <id>
   tenantctl temporal-backfill-form-workflows --tenant-id <id> [--dry-run]
   tenantctl openfga-grant-tenant-admin --tenant-id <id> --account-id <account-id>

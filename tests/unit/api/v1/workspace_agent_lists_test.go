@@ -142,6 +142,21 @@ func TestWorkspaceAgentListEndpointsReturnTypedResponses(t *testing.T) {
 		if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].ID != "agent-list" {
 			t.Fatalf("unexpected agent definition list: %+v", listed)
 		}
+		if len(listed.Items[0].Versions) != 0 {
+			t.Fatalf("list response should omit version history: %+v", listed.Items[0].Versions)
+		}
+	})
+
+	t.Run("agent definition detail", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/workspace/agents/agent-list", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected detail status 200, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+		detail := decodeData[domain.AgentDefinition](t, recorder.Body.Bytes())
+		if detail.ID != "agent-list" {
+			t.Fatalf("unexpected agent detail: %+v", detail)
+		}
 	})
 
 	t.Run("agent tools", func(t *testing.T) {

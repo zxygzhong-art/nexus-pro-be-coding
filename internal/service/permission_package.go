@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultHRPermissionPackageApplication = "hr"
-	defaultHRPermissionPackageVersion     = "1.0.2"
+	defaultHRPermissionPackageVersion     = "1.0.3"
 )
 
 var semverPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
@@ -65,7 +65,11 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					agentToolPermission("check_leave_eligibility"),
 					agentToolPermission("my_clock_records"),
 					agentToolPermission("my_attendance_summary"),
+					agentToolPermission("clock_in_or_out"),
+					agentToolPermission("my_attendance_anomalies"),
+					agentToolPermission("schedule_notification"),
 					agentToolPermission("my_form_history"),
+					agentToolPermission("withdraw_or_cancel_leave_request"),
 					agentToolPermission("my_pending_reviews"),
 					agentToolPermission("list_published_form_templates"),
 					agentToolPermission("get_published_form_template"),
@@ -73,6 +77,7 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					agentToolPermission("update_form_draft"),
 					agentToolPermission("preview_form_submission"),
 					agentToolPermission("prepare_bulk_review"),
+					agentToolPermission("create_hr_handoff_ticket"),
 				},
 			},
 			{
@@ -127,15 +132,29 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					agentToolPermission("check_leave_eligibility"),
 					agentToolPermission("my_clock_records"),
 					agentToolPermission("my_attendance_summary"),
+					agentToolPermission("clock_in_or_out"),
+					agentToolPermission("my_attendance_anomalies"),
+					agentToolPermission("team_attendance_today"),
+					agentToolPermission("team_attendance_anomalies"),
+					agentToolPermission("schedule_coverage_gaps"),
+					agentToolPermission("schedule_notification"),
 					agentToolPermission("my_form_history"),
+					agentToolPermission("withdraw_or_cancel_leave_request"),
 					agentToolPermission("my_pending_reviews"),
 					agentToolPermission("workspace_insights"),
+					agentToolPermission("hr_attendance_anomaly_report"),
+					agentToolPermission("payroll_attendance_export"),
+					agentToolPermission("hr_faq_insights"),
+					agentToolPermission("employee_bulk_import"),
+					agentToolPermission("employee_lifecycle_change"),
+					agentToolPermission("employee_change_history"),
 					agentToolPermission("list_published_form_templates"),
 					agentToolPermission("get_published_form_template"),
 					agentToolPermission("create_form_draft"),
 					agentToolPermission("update_form_draft"),
 					agentToolPermission("preview_form_submission"),
 					agentToolPermission("prepare_bulk_review"),
+					agentToolPermission("create_hr_handoff_ticket"),
 					agentToolPermission("form.get_capabilities"),
 					agentToolPermission("form.get_data_source_schema"),
 					agentToolPermission("form.create_draft"),

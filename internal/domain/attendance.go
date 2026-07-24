@@ -1,23 +1,27 @@
 package domain
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // LeaveBalance 定義請假 balance 的資料結構。
 type LeaveBalance struct {
-	ID               string     `json:"id"`
-	TenantID         string     `json:"tenant_id"`
-	EmployeeID       string     `json:"employee_id"`
-	LeaveType        string     `json:"leave_type"`
-	LeaveTypeID      string     `json:"leave_type_id"`
-	EntitlementYear  int        `json:"entitlement_year"`
-	GrantedMinutes   int        `json:"granted_minutes"`
-	UsedMinutes      int        `json:"used_minutes"`
-	RemainingMinutes int        `json:"remaining_minutes"`
-	Source           string     `json:"source"`
-	LastSyncedAt     *time.Time `json:"last_synced_at,omitempty"`
+	ID               string         `json:"id"`
+	TenantID         string         `json:"tenant_id"`
+	EmployeeID       string         `json:"employee_id"`
+	LeaveType        string         `json:"leave_type"`
+	LeaveTypeID      string         `json:"leave_type_id"`
+	EntitlementYear  int            `json:"entitlement_year"`
+	GrantedMinutes   int            `json:"granted_minutes"`
+	UsedMinutes      int            `json:"used_minutes"`
+	RemainingMinutes int            `json:"remaining_minutes"`
+	Source           string         `json:"source"`
+	SourcePayload    map[string]any `json:"-"`
+	SourceUpdatedAt  *time.Time     `json:"source_updated_at,omitempty"`
+	LastSyncedAt     *time.Time     `json:"last_synced_at,omitempty"`
 	// SnapshotRemainingMinutes is the unmodified upstream bucket. Effective
 	// availability is derived by applying the append-only local entries.
 	SnapshotRemainingMinutes int       `json:"snapshot_remaining_minutes,omitempty"`
@@ -72,26 +76,32 @@ type LeaveBalanceEntry struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-// LeaveRecord is one Nexus or eHRMS leave fact tied to exactly one annual balance.
+// LeaveRecord is one Nexus or eHRMS leave fact. EHRMS facts may remain
+// unmatched until the corresponding annual balance arrives.
 type LeaveRecord struct {
-	ID                   string     `json:"id"`
-	TenantID             string     `json:"tenant_id"`
-	EmployeeID           string     `json:"employee_id"`
-	LeaveTypeID          string     `json:"leave_type_id"`
-	BalanceID            string     `json:"balance_id"`
-	EntitlementYear      int        `json:"entitlement_year"`
-	Source               string     `json:"source"`
-	EventDate            time.Time  `json:"event_date"`
-	StartAt              time.Time  `json:"start_at"`
-	EndAt                time.Time  `json:"end_at"`
-	NetMinutes           int        `json:"net_minutes"`
-	Remark               string     `json:"remark,omitempty"`
-	Status               string     `json:"status"`
-	MatchedRecordID      string     `json:"matched_record_id,omitempty"`
-	ReconciliationStatus string     `json:"reconciliation_status"`
-	LastSeenAt           *time.Time `json:"last_seen_at,omitempty"`
-	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID                   string         `json:"id"`
+	TenantID             string         `json:"tenant_id"`
+	EmployeeID           string         `json:"employee_id"`
+	LeaveTypeID          string         `json:"leave_type_id"`
+	BalanceID            string         `json:"balance_id,omitempty"`
+	EntitlementYear      int            `json:"entitlement_year"`
+	Source               string         `json:"source"`
+	ExternalRef          string         `json:"external_ref,omitempty"`
+	EventDate            time.Time      `json:"event_date"`
+	StartAt              time.Time      `json:"start_at"`
+	EndAt                time.Time      `json:"end_at"`
+	NetMinutes           int            `json:"net_minutes"`
+	Remark               string         `json:"remark,omitempty"`
+	Status               string         `json:"status"`
+	MatchedRecordID      string         `json:"matched_record_id,omitempty"`
+	ReconciliationStatus string         `json:"reconciliation_status"`
+	BalanceMatchStatus   string         `json:"balance_match_status"`
+	BalanceMatchReason   string         `json:"balance_match_reason,omitempty"`
+	SourcePayload        map[string]any `json:"-"`
+	SourceUpdatedAt      *time.Time     `json:"source_updated_at,omitempty"`
+	LastSeenAt           *time.Time     `json:"last_seen_at,omitempty"`
+	DeletedAt            *time.Time     `json:"deleted_at,omitempty"`
+	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
 // LeaveType is one tenant leave catalog row synced from EHRMS /leave-types.
@@ -325,6 +335,203 @@ type AttendanceDailySummary struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
+const (
+	legacyAttendanceShiftStart = "_legacy_shift_start"
+	legacyAttendanceShiftEnd   = "_legacy_shift_end"
+	legacyAttendanceShiftHours = "_legacy_shift_hours"
+	legacyAttendanceDailyHours = "_legacy_daily_hours"
+	legacyAttendanceClockHours = "_legacy_clock_hours"
+	legacyAttendanceClockStart = "_legacy_clock_start"
+	legacyAttendanceClockEnd   = "_legacy_clock_end"
+)
+
+// AttendanceDailyRecordFromSummary keeps the old API/store contract backed by
+// the unified eHRMS daily row while attendance_daily_summaries is retired.
+func AttendanceDailyRecordFromSummary(summary AttendanceDailySummary) AttendanceDailyRecord {
+	payload := copyAttendanceMap(summary.Payload)
+	payload[legacyAttendanceShiftStart] = summary.ShiftStart
+	payload[legacyAttendanceShiftEnd] = summary.ShiftEnd
+	payload[legacyAttendanceShiftHours] = summary.ShiftHours
+	payload[legacyAttendanceDailyHours] = summary.DailyHours
+	payload[legacyAttendanceClockHours] = summary.ClockHours
+	payload[legacyAttendanceClockStart] = summary.ClockStart
+	payload[legacyAttendanceClockEnd] = summary.ClockEnd
+	source := strings.ToLower(strings.TrimSpace(summary.Source))
+	if source != "local" {
+		source = "ehrms"
+	}
+	record := AttendanceDailyRecord{
+		TenantID: summary.TenantID, EmployeeID: summary.EmployeeID, WorkDate: summary.WorkDate,
+		Source: source, ScheduledMinutes: attendanceSummaryMinutes(summary.ShiftHours),
+		RequiredMinutes: attendanceSummaryMinutes(summary.DailyHours),
+		WorkedMinutes:   attendanceSummaryMinutes(summary.ClockHours),
+		ExternalRef:     summary.ExternalRef, Payload: payload,
+		InputFingerprint: fmt.Sprintf("legacy-summary:%s:%s:%d", summary.EmployeeID, summary.WorkDate, summary.UpdatedAt.UnixNano()),
+		CreatedAt:        summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
+	}
+	record.ScheduledStartAt = attendanceSummaryTime(summary.WorkDate, summary.ShiftStart)
+	record.ScheduledEndAt = attendanceSummaryTime(summary.WorkDate, summary.ShiftEnd)
+	record.ClockInAt = attendanceSummaryTime(summary.WorkDate, summary.ClockStart)
+	record.ClockOutAt = attendanceSummaryTime(summary.WorkDate, summary.ClockEnd)
+	if record.ScheduledStartAt != nil && record.ScheduledEndAt != nil && !record.ScheduledEndAt.After(*record.ScheduledStartAt) {
+		next := record.ScheduledEndAt.AddDate(0, 0, 1)
+		record.ScheduledEndAt = &next
+	}
+	if record.ClockInAt != nil && record.ClockOutAt != nil && record.ClockOutAt.Before(*record.ClockInAt) {
+		next := record.ClockOutAt.AddDate(0, 0, 1)
+		record.ClockOutAt = &next
+	}
+	return record
+}
+
+// AttendanceDailySummaryFromRecord adapts unified rows for existing workspace
+// and API response shapes without restoring the retired physical table.
+func AttendanceDailySummaryFromRecord(record AttendanceDailyRecord) AttendanceDailySummary {
+	return AttendanceDailySummary{
+		TenantID: record.TenantID, EmployeeID: record.EmployeeID, WorkDate: record.WorkDate,
+		ShiftStart: attendanceLegacyTime(record.Payload, legacyAttendanceShiftStart, record.ScheduledStartAt),
+		ShiftEnd:   attendanceLegacyTime(record.Payload, legacyAttendanceShiftEnd, record.ScheduledEndAt),
+		ShiftHours: attendanceLegacyHours(record.Payload, legacyAttendanceShiftHours, "shift_hours", record.ScheduledMinutes),
+		DailyHours: attendanceLegacyHours(record.Payload, legacyAttendanceDailyHours, "daily_hours", record.RequiredMinutes),
+		ClockHours: attendanceLegacyHours(record.Payload, legacyAttendanceClockHours, "clock_hours", record.WorkedMinutes),
+		ClockStart: attendanceLegacyTime(record.Payload, legacyAttendanceClockStart, record.ClockInAt),
+		ClockEnd:   attendanceLegacyTime(record.Payload, legacyAttendanceClockEnd, record.ClockOutAt),
+		Payload:    copyAttendanceMap(record.Payload), Source: record.Source, ExternalRef: record.ExternalRef,
+		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+	}
+}
+
+func attendanceSummaryMinutes(hours float64) int {
+	if hours <= 0 {
+		return 0
+	}
+	return int(hours*60 + 0.5)
+}
+
+func attendanceSummaryTime(workDate, value string) *time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "15:04:05", "15:04"} {
+		candidate := value
+		if strings.HasPrefix(layout, "15:") {
+			candidate = strings.TrimSpace(workDate) + " " + value
+			layout = "2006-01-02 " + layout
+		}
+		if parsed, err := time.ParseInLocation(layout, candidate, location); err == nil {
+			return &parsed
+		}
+	}
+	return nil
+}
+
+func attendanceLegacyTime(payload map[string]any, key string, value *time.Time) string {
+	if text, ok := payload[key].(string); ok && strings.TrimSpace(text) != "" {
+		return strings.TrimSpace(text)
+	}
+	if value == nil {
+		return ""
+	}
+	return value.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("15:04")
+}
+
+func attendanceLegacyHours(payload map[string]any, legacyKey, sourceKey string, minutes int) float64 {
+	for _, key := range []string{legacyKey, sourceKey} {
+		switch value := payload[key].(type) {
+		case float64:
+			return value
+		case float32:
+			return float64(value)
+		case int:
+			return float64(value)
+		case string:
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+				return parsed
+			}
+		}
+	}
+	return float64(minutes) / 60
+}
+
+func copyAttendanceMap(source map[string]any) map[string]any {
+	out := make(map[string]any, len(source)+7)
+	for key, value := range source {
+		out[key] = value
+	}
+	return out
+}
+
+// AttendanceDailyRecord is the source-normalized daily fact used to compare
+// Nexus calculations with the eHRMS day sheet.
+type AttendanceDailyRecord struct {
+	TenantID             string         `json:"tenant_id"`
+	EmployeeID           string         `json:"employee_id"`
+	WorkDate             string         `json:"work_date"`
+	Source               string         `json:"source"`
+	ScheduledStartAt     *time.Time     `json:"scheduled_start_at,omitempty"`
+	ScheduledEndAt       *time.Time     `json:"scheduled_end_at,omitempty"`
+	ScheduledMinutes     int            `json:"scheduled_minutes"`
+	RequiredMinutes      int            `json:"required_minutes"`
+	WorkedMinutes        int            `json:"worked_minutes"`
+	CreditedLeaveMinutes int            `json:"credited_leave_minutes"`
+	OvertimeMinutes      int            `json:"overtime_minutes"`
+	ClockInAt            *time.Time     `json:"clock_in_at,omitempty"`
+	ClockOutAt           *time.Time     `json:"clock_out_at,omitempty"`
+	ClockInRecordID      string         `json:"clock_in_record_id,omitempty"`
+	ClockOutRecordID     string         `json:"clock_out_record_id,omitempty"`
+	PunchCount           int            `json:"punch_count"`
+	DayStatus            string         `json:"day_status,omitempty"`
+	AnomalyReasons       []string       `json:"anomaly_reasons,omitempty"`
+	InputFingerprint     string         `json:"input_fingerprint"`
+	ExternalRef          string         `json:"external_ref,omitempty"`
+	Payload              map[string]any `json:"payload,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+}
+
+// AttendanceDailyLeaveSegment is one normalized leave slice embedded in an
+// upstream attendance day. LeaveRecordID points to the eHRMS leave fact; its
+// MatchedRecordID continues the chain to the corresponding Nexus request.
+type AttendanceDailyLeaveSegment struct {
+	TenantID           string         `json:"tenant_id"`
+	EmployeeID         string         `json:"employee_id"`
+	WorkDate           string         `json:"work_date"`
+	DailySource        string         `json:"daily_source"`
+	SegmentNo          int            `json:"segment_no"`
+	LeaveTypeID        string         `json:"leave_type_id,omitempty"`
+	SourceLeaveType    string         `json:"source_leave_type,omitempty"`
+	StartAt            *time.Time     `json:"start_at,omitempty"`
+	EndAt              *time.Time     `json:"end_at,omitempty"`
+	Minutes            int            `json:"minutes"`
+	Counted            bool           `json:"counted"`
+	TimeInferred       bool           `json:"time_inferred"`
+	LeaveRecordID      string         `json:"leave_record_id,omitempty"`
+	LinkStatus         string         `json:"link_status"`
+	MatchBasis         string         `json:"match_basis,omitempty"`
+	CandidateRecordIDs []string       `json:"candidate_record_ids,omitempty"`
+	Payload            map[string]any `json:"payload,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
+// AttendanceDailyReconciliation stores the latest source-to-source comparison.
+type AttendanceDailyReconciliation struct {
+	TenantID            string         `json:"tenant_id"`
+	EmployeeID          string         `json:"employee_id"`
+	WorkDate            string         `json:"work_date"`
+	LocalFingerprint    string         `json:"local_fingerprint,omitempty"`
+	EHRMSFingerprint    string         `json:"ehrms_fingerprint,omitempty"`
+	Status              string         `json:"status"`
+	Differences         map[string]any `json:"differences,omitempty"`
+	ResolutionStatus    string         `json:"resolution_status"`
+	ResolvedByAccountID string         `json:"resolved_by_account_id,omitempty"`
+	ResolvedAt          *time.Time     `json:"resolved_at,omitempty"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+}
+
 // AttendanceDayProjection is the rebuildable, policy-versioned read model for
 // one employee and business date. Raw clocks, leave cases and policy versions
 // remain the sources of truth; this row is safe to replace after any input
@@ -415,6 +622,8 @@ type AttendanceMonthlySummary struct {
 	WorkedMinutes  int                           `json:"worked_minutes"`
 	RecordCount    int                           `json:"record_count"`
 	AbnormalDays   int                           `json:"abnormal_days"`
+	LeaveDays      float64                       `json:"leave_days"`
+	OvertimeHours  float64                       `json:"overtime_hours"`
 	Days           []AttendanceMonthlyDaySummary `json:"days"`
 }
 
@@ -618,16 +827,20 @@ type EHRMSLeaveTypeSyncResponse struct {
 	Deactivated int `json:"deactivated"`
 }
 
-// EHRMSAttendanceQuery 定義按單一 eHRMS 員工查詢考勤的條件。
+// EHRMSAttendanceQuery 定義按單一 eHRMS 員工查詢考勤與假勤的條件。
 type EHRMSAttendanceQuery struct {
 	EmployeeID string
 	Start      string
 	End        string
+	Year       string
 }
 
 // EHRMSAttendanceSyncInput 定義 eHRMS 考勤 sync 輸入的資料結構。
 type EHRMSAttendanceSyncInput struct {
-	Mode string `json:"mode,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	Start          string `json:"start,omitempty"`
+	End            string `json:"end,omitempty"`
+	SkipLeaveTypes bool   `json:"-"`
 }
 
 // EHRMSAttendanceSyncResponse 定義 eHRMS 考勤 sync 回應的資料結構。
@@ -649,8 +862,10 @@ type EHRMSAttendanceSyncResponse struct {
 	LeaveDetailsUpdated   int                   `json:"leave_details_updated"`
 	LeaveDetailsSkipped   int                   `json:"leave_details_skipped"`
 	LeaveDetailsFailed    int                   `json:"leave_details_failed"`
+	LeaveDetailsUnmatched int                   `json:"leave_details_unmatched"`
 	Mode                  string                `json:"mode"`
 	Start                 string                `json:"start,omitempty"`
+	End                   string                `json:"end,omitempty"`
 	Results               []BatchEmployeeResult `json:"results,omitempty"`
 	RowErrors             []RowError            `json:"row_errors,omitempty"`
 }

@@ -57,8 +57,8 @@ func TestProvisionTenantCreatesUsableAdmin(t *testing.T) {
 		t.Fatalf("expected manager approval stage, stages=%+v", stages)
 	}
 	templates, err := store.ListFormTemplates(context.Background(), "tenant-acme")
-	if err != nil || len(templates) != 6 {
-		t.Fatalf("expected six common form templates, templates=%+v err=%v", templates, err)
+	if err != nil || len(templates) != 7 {
+		t.Fatalf("expected seven common form templates, templates=%+v err=%v", templates, err)
 	}
 	policy, ok, err := store.GetAttendancePolicy(context.Background(), "tenant-acme")
 	if err != nil || !ok || policy.Version != 1 || policy.WorkTime.StandardStart != "09:00" {
@@ -146,8 +146,8 @@ func TestProvisionTenantIsIdempotent(t *testing.T) {
 		t.Fatalf("expected one identity after rerun, identities=%+v err=%v", identities, err)
 	}
 	templates, err := store.ListFormTemplates(context.Background(), "tenant-acme")
-	if err != nil || len(templates) != 6 {
-		t.Fatalf("expected rerun to preserve six default templates, templates=%+v err=%v", templates, err)
+	if err != nil || len(templates) != 7 {
+		t.Fatalf("expected rerun to preserve seven default templates, templates=%+v err=%v", templates, err)
 	}
 	preservedLeave, ok, err := store.GetFormTemplateByKey(context.Background(), "tenant-acme", "leave-request")
 	if err != nil || !ok || preservedLeave.Name != "Acme Leave Request" {
@@ -182,8 +182,8 @@ func TestEnsureTenantDefaultFormTemplatesBackfillsOnlyMissingForms(t *testing.T)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
 
 	created, err := svc.EnsureTenantDefaultFormTemplates(context.Background(), "demo")
-	if err != nil || created != 5 {
-		t.Fatalf("expected five missing templates, created=%d err=%v", created, err)
+	if err != nil || created != 6 {
+		t.Fatalf("expected six missing templates, created=%d err=%v", created, err)
 	}
 	leave, ok, err := store.GetFormTemplateByKey(context.Background(), "demo", "leave-request")
 	if err != nil || !ok || leave.Name != "自訂請假單" || leave.CurrentVersion != 3 {
@@ -192,6 +192,54 @@ func TestEnsureTenantDefaultFormTemplatesBackfillsOnlyMissingForms(t *testing.T)
 	created, err = svc.EnsureTenantDefaultFormTemplates(context.Background(), "demo")
 	if err != nil || created != 0 {
 		t.Fatalf("expected idempotent second backfill, created=%d err=%v", created, err)
+	}
+}
+
+func TestEnsureTenantDefaultFormTemplatesForKeysBackfillsOnlySelectedForms(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	if err := store.UpsertTenant(context.Background(), domain.Tenant{ID: "demo", Name: "Demo", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	keys := []string{"leave-request", "overtime-approval", "punch-fix"}
+
+	created, err := svc.EnsureTenantDefaultFormTemplatesForKeys(context.Background(), "demo", keys)
+	if err != nil || created != len(keys) {
+		t.Fatalf("expected three selected templates, created=%d err=%v", created, err)
+	}
+	templates, err := store.ListFormTemplates(context.Background(), "demo")
+	if err != nil || len(templates) != len(keys) {
+		t.Fatalf("expected only selected templates, templates=%+v err=%v", templates, err)
+	}
+	for _, key := range keys {
+		if _, ok, getErr := store.GetFormTemplateByKey(context.Background(), "demo", key); getErr != nil || !ok {
+			t.Fatalf("expected selected template %s, ok=%v err=%v", key, ok, getErr)
+		}
+	}
+	if _, ok, err := store.GetFormTemplateByKey(context.Background(), "demo", "job-change"); err != nil || ok {
+		t.Fatalf("expected unselected template to remain absent, ok=%v err=%v", ok, err)
+	}
+	created, err = svc.EnsureTenantDefaultFormTemplatesForKeys(context.Background(), "demo", keys)
+	if err != nil || created != 0 {
+		t.Fatalf("expected selected backfill to be idempotent, created=%d err=%v", created, err)
+	}
+}
+
+func TestEnsureTenantDefaultFormTemplatesForKeysRejectsUnknownKey(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	if err := store.UpsertTenant(context.Background(), domain.Tenant{ID: "demo", Name: "Demo", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+
+	if _, err := svc.EnsureTenantDefaultFormTemplatesForKeys(context.Background(), "demo", []string{"unknown-form"}); err == nil {
+		t.Fatal("expected unknown default form key to be rejected")
+	}
+	templates, err := store.ListFormTemplates(context.Background(), "demo")
+	if err != nil || len(templates) != 0 {
+		t.Fatalf("expected validation failure before writes, templates=%+v err=%v", templates, err)
 	}
 }
 

@@ -100,11 +100,19 @@ func TestWorkspaceTurnoverMatchesEmployeeStatsAcrossInactiveOrgMetadata(t *testi
 	}
 }
 
-func TestWorkspaceInsightsUsesRequestedMonthForOverviewMetrics(t *testing.T) {
+func TestWorkspaceInsightsUsesRequestedMonthForAttendanceMetrics(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-may", EmployeeNo: "IKL101", Name: "May Hire", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-jun", EmployeeNo: "IKL102", Name: "June Hire", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	for _, summary := range []domain.AttendanceDailySummary{
+		{TenantID: "tenant-1", EmployeeID: "emp-may", WorkDate: "2026-05-20", DailyHours: 4, ClockHours: 4, Source: "ehrms", ExternalRef: "IKL101:2026-05-20", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-jun", WorkDate: "2026-06-19", DailyHours: 6, ClockHours: 6, Source: "ehrms", ExternalRef: "IKL102:2026-06-19", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertAttendanceDailySummary(context.Background(), summary); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	may, err := svc.Workspace().Insights(ctx, domain.PlatformInsightsQuery{Month: "2026-05"})
 	if err != nil {
@@ -116,13 +124,13 @@ func TestWorkspaceInsightsUsesRequestedMonthForOverviewMetrics(t *testing.T) {
 	}
 	mayDeptTasks := may.Reports["dept_tasks"].(map[string]any)
 	juneDeptTasks := june.Reports["dept_tasks"].(map[string]any)
-	mayHires := insightMetricValueByID(t, mayDeptTasks, "hires")
-	juneHires := insightMetricValueByID(t, juneDeptTasks, "hires")
-	if may.Month != "2026-05" || mayHires != 1 {
-		t.Fatalf("expected May insights to use May overview metrics, got month=%s dept_tasks=%+v", may.Month, mayDeptTasks)
+	mayHours := insightMetricValueByID(t, mayDeptTasks, "dept-total-hours")
+	juneHours := insightMetricValueByID(t, juneDeptTasks, "dept-total-hours")
+	if may.Month != "2026-05" || mayHours != float64(4) {
+		t.Fatalf("expected May insights to use May attendance metrics, got month=%s dept_tasks=%+v", may.Month, mayDeptTasks)
 	}
-	if june.Month != "2026-06" || juneHires != 1 {
-		t.Fatalf("expected June insights to use June overview metrics, got month=%s dept_tasks=%+v", june.Month, juneDeptTasks)
+	if june.Month != "2026-06" || juneHours != float64(6) {
+		t.Fatalf("expected June insights to use June attendance metrics, got month=%s dept_tasks=%+v", june.Month, juneDeptTasks)
 	}
 }
 
@@ -183,6 +191,15 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	wantTotal := members[0]["hours"].(float64) + members[1]["hours"].(float64)
 	if totalHours != float64(56.07) || totalHours != wantTotal {
 		t.Fatalf("expected rounded total hours %.2f from member rows, got %.2f", wantTotal, totalHours)
+	}
+	metrics := report["metrics"].([]map[string]any)
+	if len(metrics) != 4 {
+		t.Fatalf("expected exactly four department summary metrics, got %+v", metrics)
+	}
+	if insightMetricValueByID(t, report, "dept-members") != 2 ||
+		insightMetricValueByID(t, report, "dept-avg-hours") != float64(28.04) ||
+		insightMetricValueByID(t, report, "dept-leave-days") != float64(0.875) {
+		t.Fatalf("unexpected department summary metrics: %+v", metrics)
 	}
 }
 

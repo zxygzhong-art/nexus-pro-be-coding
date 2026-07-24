@@ -326,7 +326,7 @@ func agentToolInputSchema(name string) *jsonschema.Schema {
 	}
 
 	switch name {
-	case "get_my_profile", "my_leave_balances", "my_attendance_summary", "my_pending_reviews", "list_published_form_templates", "form.get_capabilities", "form.get_data_source_schema":
+	case "get_my_profile", "my_leave_balances", "my_attendance_summary", "my_pending_reviews", "list_published_form_templates", "hr_faq_insights", "form.get_capabilities", "form.get_data_source_schema":
 		return object(map[string]*jsonschema.Schema{})
 	case "knowledge.search":
 		return object(map[string]*jsonschema.Schema{"query": stringProperty("Tenant knowledge search query.")}, "query")
@@ -342,6 +342,90 @@ func agentToolInputSchema(name string) *jsonschema.Schema {
 		return object(map[string]*jsonschema.Schema{"employee_id": stringProperty("Employee ID.")}, "employee_id")
 	case "workspace_insights":
 		return object(map[string]*jsonschema.Schema{"month": stringProperty("Optional month in YYYY-MM format.")})
+	case "my_attendance_anomalies":
+		return object(map[string]*jsonschema.Schema{"month": stringProperty("Optional month in YYYY-MM format.")})
+	case "clock_in_or_out":
+		direction := stringProperty("Clock direction; omit to use the server-reported next action.")
+		direction.Enum = []any{"in", "out"}
+		return object(map[string]*jsonschema.Schema{
+			"direction":       direction,
+			"latitude":        numberProperty("Current latitude."),
+			"longitude":       numberProperty("Current longitude."),
+			"accuracy_meters": numberProperty("Location accuracy in meters."),
+			"device_id":       stringProperty("Optional device identifier."),
+			"client_event_id": stringProperty("Optional idempotency identifier."),
+		}, "latitude", "longitude", "accuracy_meters")
+	case "team_attendance_today", "schedule_coverage_gaps":
+		return object(map[string]*jsonschema.Schema{
+			"department_id": stringProperty("Optional authorized department ID."),
+			"keyword":       stringProperty("Optional employee keyword."),
+			"limit":         integerProperty("Maximum employee rows, up to 100."),
+		})
+	case "team_attendance_anomalies", "hr_attendance_anomaly_report":
+		severity := stringProperty("Optional anomaly severity.")
+		severity.Enum = []any{"full_day", "missing_punch", "time_anomaly"}
+		return object(map[string]*jsonschema.Schema{
+			"month":                    stringProperty("Optional month in YYYY-MM format."),
+			"base_department_id":       stringProperty("Optional authorized base department ID."),
+			"department_id":            stringProperty("Optional department filter within the authorized base."),
+			"keyword":                  stringProperty("Optional employee keyword."),
+			"severity":                 severity,
+			"page":                     integerProperty("Anomaly result page."),
+			"page_size":                integerProperty("Anomaly rows per page, up to 100."),
+			"employee_page":            integerProperty("Bounded employee page to scan."),
+			"employee_page_size":       integerProperty("Employees per scan page, up to 100."),
+			"overtime_threshold_hours": numberProperty("Optional monthly overtime threshold; rows above it are returned as alerts."),
+		})
+	case "schedule_notification":
+		return object(map[string]*jsonschema.Schema{
+			"employee_ids": arrayProperty(stringProperty("Authorized employee ID."), "Employees to notify."),
+			"title":        stringProperty("Notification title."),
+			"body":         stringProperty("Notification body."),
+			"link_url":     stringProperty("Optional Nexus Pro link."),
+		}, "employee_ids", "title", "body")
+	case "withdraw_or_cancel_leave_request":
+		return object(map[string]*jsonschema.Schema{
+			"form_instance_id": stringProperty("Owned leave form instance ID."),
+			"reason":           stringProperty("Optional withdrawal reason."),
+		}, "form_instance_id")
+	case "payroll_attendance_export":
+		kind := stringProperty("CSV export kind.")
+		kind.Enum = []any{"attendance", "clock", "abnormal"}
+		return object(map[string]*jsonschema.Schema{
+			"month":         stringProperty("Optional month in YYYY-MM format."),
+			"department_id": stringProperty("Optional authorized department ID."),
+			"kind":          kind,
+		})
+	case "employee_bulk_import":
+		employee := object(map[string]*jsonschema.Schema{
+			"employee_no":   stringProperty("Employee number."),
+			"name":          stringProperty("Employee name."),
+			"company_email": stringProperty("Company email."),
+			"org_unit_id":   stringProperty("Organization unit ID."),
+			"position_id":   stringProperty("Position ID."),
+			"status":        stringProperty("Employment status."),
+		}, "name")
+		return object(map[string]*jsonschema.Schema{
+			"employees": arrayProperty(employee, "Employee rows; maximum 50."),
+		}, "employees")
+	case "employee_lifecycle_change":
+		return object(map[string]*jsonschema.Schema{
+			"employee_id": stringProperty("Employee ID."),
+			"status":      stringProperty("Target status, for example leave_suspended or active."),
+			"reason":      stringProperty("Business reason."),
+			"start_date":  stringProperty("Effective date in YYYY-MM-DD."),
+			"end_date":    stringProperty("Optional end date in YYYY-MM-DD."),
+			"details":     objectProperty("Optional lifecycle details."),
+		}, "employee_id", "status", "reason", "start_date")
+	case "employee_change_history":
+		return object(map[string]*jsonschema.Schema{"employee_id": stringProperty("Employee ID.")}, "employee_id")
+	case "create_hr_handoff_ticket":
+		return object(map[string]*jsonschema.Schema{
+			"category":            stringProperty("HR service category."),
+			"question":            stringProperty("Employee question requiring HR follow-up."),
+			"checked_sources":     arrayProperty(stringProperty("Source title."), "Sources already checked."),
+			"missing_information": stringProperty("Information still required from HR."),
+		}, "category", "question", "missing_information")
 	case "check_leave_eligibility":
 		return object(map[string]*jsonschema.Schema{
 			"leave_type": stringProperty("Leave type code returned by the active policy."),

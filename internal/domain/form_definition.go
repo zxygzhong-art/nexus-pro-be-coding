@@ -79,9 +79,10 @@ type FormFieldOptionV2 struct {
 
 // FormFieldBindingV2 描述受控數據源綁定，僅允許 capability catalog 中的字段。
 type FormFieldBindingV2 struct {
-	SourceID   string `json:"sourceId"`
-	ValueField string `json:"valueField"`
-	LabelField string `json:"labelField,omitempty"`
+	SourceID   string              `json:"sourceId"`
+	ValueField string              `json:"valueField"`
+	LabelField string              `json:"labelField,omitempty"`
+	Filters    map[string][]string `json:"filters,omitempty"`
 }
 
 // FormFieldValidationV2 描述聲明式校驗規則；MVP 不執行任意表達式。
@@ -210,7 +211,7 @@ var formDefinitionIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var formDefinitionBindingFields = map[string]map[string]struct{}{
 	"current_user": {"display_name": {}, "email": {}, "employee_id": {}, "employee_no": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}},
 	"departments":  {"id": {}, "name": {}, "code": {}},
-	"employees":    {"id": {}, "name": {}, "employee_no": {}, "email": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}},
+	"employees":    {"id": {}, "name": {}, "employee_no": {}, "email": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}, "work_status": {}},
 	"positions":    {"id": {}, "name": {}, "code": {}, "department_id": {}},
 	"leave_types":  {"code": {}, "name": {}},
 }
@@ -328,6 +329,22 @@ func validateFormDefinitionBinding(add func(string, string, string), path string
 	if _, ok := allowedFields[strings.TrimSpace(field.Binding.ValueField)]; !ok {
 		add(path+".valueField", "unsupported_field", "unsupported data source value field")
 	}
+	for filterField, values := range field.Binding.Filters {
+		if sourceID != "employees" || filterField != "work_status" {
+			add(path+".filters."+filterField, "unsupported_filter", "unsupported data source filter")
+			continue
+		}
+		if len(values) == 0 {
+			add(path+".filters."+filterField, "required", "data source filter requires at least one value")
+			continue
+		}
+		for _, value := range values {
+			status, ok := ParseEmployeeStatus(value)
+			if !ok || !status.Valid(false) || string(status) != value {
+				add(path+".filters."+filterField, "unsupported_value", "unsupported employee work status")
+			}
+		}
+	}
 	if sourceID == "current_user" {
 		if field.Widget != "autofill" && field.Widget != "readonly" {
 			add(path, "invalid_widget", "current_user bindings require an autofill or readonly field")
@@ -369,7 +386,11 @@ func CompileFormDefinitionSchemaV2(schema FormDefinitionSchemaV2) (map[string]an
 					compiled["options"] = options
 				}
 				if field.Binding != nil {
-					compiled["binding"] = map[string]any{"source_id": field.Binding.SourceID, "value_field": field.Binding.ValueField, "label_field": field.Binding.LabelField}
+					binding := map[string]any{"source_id": field.Binding.SourceID, "value_field": field.Binding.ValueField, "label_field": field.Binding.LabelField}
+					if len(field.Binding.Filters) > 0 {
+						binding["filters"] = field.Binding.Filters
+					}
+					compiled["binding"] = binding
 				}
 				if field.Analytics.Reportable || field.Analytics.Filterable || field.Analytics.Groupable || field.Analytics.Role != "" {
 					compiled["analytics"] = field.Analytics

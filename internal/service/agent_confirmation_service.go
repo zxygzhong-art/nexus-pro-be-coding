@@ -19,6 +19,7 @@ const (
 	agentConfirmationFormSubmit    = "form_submit"
 	agentConfirmationBulkReview    = "workflow_bulk_review"
 	agentConfirmationExternalTool  = "external_tool_call"
+	agentConfirmationInternalTool  = "internal_tool_action"
 	agentConfirmationStatusDone    = "completed"
 	agentConfirmationStatusPartial = "partial"
 	AgentConfirmationMemoryKey     = "__agent_confirmation__"
@@ -43,6 +44,8 @@ type agentConfirmationAction struct {
 	ExternalCapabilityID   string                            `json:"capability_id,omitempty"`
 	ExternalSchemaChecksum string                            `json:"schema_checksum,omitempty"`
 	ExternalArguments      map[string]any                    `json:"arguments,omitempty"`
+	InternalAction         string                            `json:"internal_action,omitempty"`
+	InternalArguments      map[string]any                    `json:"internal_arguments,omitempty"`
 }
 
 // agentConfirmationStore is the confirmation-only subset of repository.AgentV2Store.
@@ -72,6 +75,8 @@ func (c *Service) ExecuteAgentConfirmation(ctx RequestContext, id string, _ doma
 		result, err = c.executeConfirmedBulkReview(ctx, action)
 	case agentConfirmationExternalTool:
 		result, err = c.executeConfirmedExternalToolCall(ctx, action, record)
+	case agentConfirmationInternalTool:
+		result, err = c.executeConfirmedInternalToolAction(ctx, action)
 	default:
 		err = BadRequest("unsupported agent confirmation kind")
 	}
@@ -90,6 +95,9 @@ func (c *Service) ExecuteAgentConfirmation(ctx RequestContext, id string, _ doma
 	if action.Public.Kind == agentConfirmationExternalTool {
 		auditDetails["connection_id"] = action.ExternalConnectionID
 		auditDetails["capability_id"] = action.ExternalCapabilityID
+	}
+	if action.Public.Kind == agentConfirmationInternalTool {
+		auditDetails["internal_action"] = action.InternalAction
 	}
 	if err := c.RecordAudit(ctx, "agent.confirmation.execute", "agent_confirmation", action.Public.ID, "high", auditDetails); err != nil {
 		return domain.AgentConfirmationExecution{}, err
@@ -185,6 +193,196 @@ func (c *Service) saveAgentConfirmation(ctx RequestContext, action agentConfirma
 		Status: domain.AgentConfirmationStatusPending, ExpiresAt: action.Public.ExpiresAt,
 		CreatedAt: now, UpdatedAt: now,
 	})
+}
+
+// PrepareAgentInternalActionConfirmation binds an internal business mutation to
+// the current Agent session so the runtime cannot execute it before the user
+// clicks the server-rendered confirmation card.
+func (c *Service) PrepareAgentInternalActionConfirmation(
+	ctx RequestContext,
+	internalAction, title, description, actionLabel string,
+	arguments map[string]any,
+	rows []domain.AgentAnalysisRow,
+) (*domain.AgentConfirmation, error) {
+	internalAction = strings.TrimSpace(internalAction)
+	if internalAction == "" {
+		return nil, BadRequest("internal action is required")
+	}
+	now := c.Now()
+	confirmation := domain.AgentConfirmation{
+		ID: utils.NewID("aconf"), Kind: agentConfirmationInternalTool,
+		Title: strings.TrimSpace(title), Description: strings.TrimSpace(description),
+		Action: internalAction, ActionLabel: strings.TrimSpace(actionLabel),
+		Rows: rows, ExpiresAt: now.Add(agentConfirmationTTL),
+	}
+	if confirmation.Title == "" || confirmation.ActionLabel == "" {
+		return nil, BadRequest("confirmation title and action label are required")
+	}
+	action := agentConfirmationAction{
+		Public: confirmation, InternalAction: internalAction,
+		InternalArguments: cloneAgentConfirmationMap(arguments),
+	}
+	if err := c.saveAgentConfirmation(ctx, action); err != nil {
+		return nil, err
+	}
+	return &confirmation, nil
+}
+
+func (c *Service) executeConfirmedInternalToolAction(ctx RequestContext, action agentConfirmationAction) (domain.AgentConfirmationExecution, error) {
+	result := domain.AgentConfirmationExecution{
+		ConfirmationID: action.Public.ID, Kind: action.Public.Kind, Status: agentConfirmationStatusDone,
+	}
+	switch action.InternalAction {
+	case "clock_in_or_out":
+		var input domain.CreateAttendanceClockRecordInput
+		if err := decodeAgentConfirmationValue(action.InternalArguments, &input); err != nil {
+			return domain.AgentConfirmationExecution{}, BadRequest("invalid clock confirmation payload")
+		}
+		record, err := c.Attendance().CreateAttendanceClockRecord(ctx, input)
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		result.Data = map[string]any{"clock_record": record}
+	case "withdraw_or_cancel_leave_request":
+		id := strings.TrimSpace(stringFromAny(action.InternalArguments["form_instance_id"]))
+		if id == "" {
+			return domain.AgentConfirmationExecution{}, BadRequest("form_instance_id is required")
+		}
+		instance, err := c.Workflow().CancelForm(ctx, id, domain.CancelFormInput{Reason: strings.TrimSpace(stringFromAny(action.InternalArguments["reason"]))})
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		result.FormInstance = &instance
+	case "schedule_notification":
+		data, err := c.executeConfirmedScheduleNotification(ctx, action.InternalArguments)
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		result.Data = data
+	case "employee_bulk_import":
+		data, err := c.executeConfirmedEmployeeBulkImport(ctx, action.InternalArguments)
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		result.Data = data
+	case "employee_lifecycle_change":
+		data, err := c.executeConfirmedEmployeeLifecycleChange(ctx, action.InternalArguments)
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		result.Data = data
+	default:
+		return domain.AgentConfirmationExecution{}, BadRequest("unsupported internal agent action")
+	}
+	return result, nil
+}
+
+func (c *Service) executeConfirmedScheduleNotification(ctx RequestContext, arguments map[string]any) (map[string]any, error) {
+	var employeeIDs []string
+	if err := decodeAgentConfirmationValue(arguments["employee_ids"], &employeeIDs); err != nil || len(employeeIDs) == 0 {
+		return nil, BadRequest("employee_ids is required")
+	}
+	title := strings.TrimSpace(stringFromAny(arguments["title"]))
+	body := strings.TrimSpace(stringFromAny(arguments["body"]))
+	if title == "" || body == "" {
+		return nil, BadRequest("title and body are required")
+	}
+	accountIDs := make([]string, 0, len(employeeIDs))
+	for _, employeeID := range uniqueStrings(employeeIDs) {
+		employee, err := c.HR().GetEmployee(ctx, employeeID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(employee.AccountID) != "" {
+			accountIDs = append(accountIDs, employee.AccountID)
+		}
+	}
+	accountIDs = uniqueStrings(accountIDs)
+	if len(accountIDs) == 0 {
+		return nil, BadRequest("no selected employee has an active linked account")
+	}
+	now := c.Now().UTC()
+	notification := domain.Notification{
+		ID: utils.NewID("notif"), TenantID: ctx.TenantID, Tone: string(domain.NotificationToneWarning),
+		Category: "attendance", Title: title, Body: body, StatusText: "待處理",
+		LinkURL:    strings.TrimSpace(stringFromAny(arguments["link_url"])),
+		SourceType: "agent.schedule_notification", SourceID: actionSourceID(ctx, title, now),
+		CreatedByAccountID: ctx.AccountID, CreatedAt: now,
+	}
+	if notification.LinkURL == "" {
+		notification.LinkURL = "/attendance"
+	}
+	if err := c.Store().UpsertNotification(goContext(ctx), notification); err != nil {
+		return nil, err
+	}
+	for _, accountID := range accountIDs {
+		if err := c.Store().UpsertNotificationRecipient(goContext(ctx), domain.NotificationRecipient{
+			NotificationID: notification.ID, TenantID: ctx.TenantID, AccountID: accountID, CreatedAt: now,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"notification_id": notification.ID, "recipient_count": len(accountIDs)}, nil
+}
+
+func (c *Service) executeConfirmedEmployeeBulkImport(ctx RequestContext, arguments map[string]any) (map[string]any, error) {
+	var inputs []domain.CreateEmployeeInput
+	if err := decodeAgentConfirmationValue(arguments["employees"], &inputs); err != nil {
+		return nil, BadRequest("employees must be an array of employee objects")
+	}
+	if len(inputs) == 0 || len(inputs) > 50 {
+		return nil, BadRequest("employees must contain between 1 and 50 rows")
+	}
+	results := make([]domain.BatchEmployeeResult, 0, len(inputs))
+	for index, input := range inputs {
+		employee, err := c.HR().CreateEmployee(ctx, input)
+		if err != nil {
+			results = append(results, domain.BatchEmployeeResult{
+				RowNumber: index + 1, Success: false, Code: errorCode(err), Message: err.Error(),
+			})
+			continue
+		}
+		results = append(results, domain.BatchEmployeeResult{
+			RowNumber: index + 1, EmployeeID: employee.ID, Success: true, Action: "created", Message: "created",
+		})
+	}
+	return map[string]any{"results": results}, nil
+}
+
+func (c *Service) executeConfirmedEmployeeLifecycleChange(ctx RequestContext, arguments map[string]any) (map[string]any, error) {
+	employeeID := strings.TrimSpace(stringFromAny(arguments["employee_id"]))
+	var input domain.StatusTransitionInput
+	if err := decodeAgentConfirmationValue(arguments, &input); err != nil {
+		return nil, BadRequest("invalid employee lifecycle payload")
+	}
+	employee, err := c.HR().TransitionEmployeeStatus(ctx, employeeID, input)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"employee": employee}, nil
+}
+
+func decodeAgentConfirmationValue(value any, target any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, target)
+}
+
+func cloneAgentConfirmationMap(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if decodeAgentConfirmationValue(value, &out) != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func actionSourceID(ctx RequestContext, title string, now time.Time) string {
+	return strings.Join([]string{ctx.AccountID, title, now.Format(time.RFC3339Nano)}, ":")
 }
 
 func agentConfirmationActionPayload(action agentConfirmationAction) (map[string]any, error) {
@@ -903,6 +1101,7 @@ func toolPayload(args map[string]any) (map[string]any, error) {
 
 func (c *Service) agentFormDataSources(ctx domain.RequestContext, fields []domain.PlatformFormBuilderField) ([]domain.FormDataSource, error) {
 	used := map[string]map[string]struct{}{}
+	bindingsBySource := map[string][]domain.PlatformFormBuilderFieldBinding{}
 	for _, field := range fields {
 		if field.Binding != nil {
 			sourceID := strings.TrimSpace(field.Binding.SourceID)
@@ -913,6 +1112,7 @@ func (c *Service) agentFormDataSources(ctx domain.RequestContext, fields []domai
 			if labelField := strings.TrimSpace(field.Binding.LabelField); labelField != "" {
 				used[sourceID][labelField] = struct{}{}
 			}
+			bindingsBySource[sourceID] = append(bindingsBySource[sourceID], *field.Binding)
 		}
 	}
 	if len(used) == 0 {
@@ -935,6 +1135,16 @@ func (c *Service) agentFormDataSources(ctx domain.RequestContext, fields []domai
 			}
 		}
 		for _, record := range source.Records {
+			matchesBinding := false
+			for _, binding := range bindingsBySource[source.ID] {
+				if recordMatchesFormDataSourceBinding(source.ID, record, binding.Filters) {
+					matchesBinding = true
+					break
+				}
+			}
+			if !matchesBinding {
+				continue
+			}
 			values := make(map[string]interface{}, len(allowed))
 			for key := range allowed {
 				if value, ok := record[key]; ok {

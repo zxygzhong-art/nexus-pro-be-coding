@@ -735,7 +735,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 		return Employee{}, forbiddenAuthz(decision)
 	}
 	decision.FieldPolicies = employeeDetailFieldPolicies(decision.FieldPolicies)
-	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
+	employee, ok, err := c.Service.getBusinessEmployee(ctx, id)
 	if err != nil {
 		return Employee{}, err
 	}

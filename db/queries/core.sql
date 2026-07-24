@@ -247,17 +247,29 @@ ORDER BY closed ASC, code ASC, name ASC, created_at ASC, id ASC;
 
 -- name: UpsertEmployee :one
 INSERT INTO employees (
-    id, tenant_id, employee_no, name, company_email, personal_email, phone,
+    id, tenant_id, employee_no, external_source, external_employee_id,
+    name, company_email, personal_email, phone,
     org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status,
     hire_date, resign_date, basic_info, employment_info, education_military_info,
-    contact_info, insurance_info, internal_experiences, created_at, updated_at
+    contact_info, insurance_info, internal_experiences,
+    source_payload, source_updated_at, last_synced_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_no),
+    sqlc.arg(external_source), sqlc.arg(external_employee_id),
+    sqlc.arg(name), sqlc.arg(company_email), sqlc.arg(personal_email), sqlc.arg(phone),
+    sqlc.arg(org_unit_id), sqlc.arg(account_id), sqlc.narg(manager_employee_id),
+    sqlc.arg(position_id), sqlc.arg(position), sqlc.arg(category), sqlc.arg(status), sqlc.arg(employment_status),
+    sqlc.narg(hire_date), sqlc.narg(resign_date),
+    sqlc.arg(basic_info)::jsonb, sqlc.arg(employment_info)::jsonb,
+    sqlc.arg(education_military_info)::jsonb, sqlc.arg(contact_info)::jsonb,
+    sqlc.arg(insurance_info)::jsonb, sqlc.arg(internal_experiences)::jsonb,
+    sqlc.arg(source_payload)::jsonb, sqlc.narg(source_updated_at),
+    sqlc.narg(last_synced_at), sqlc.arg(created_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     employee_no = EXCLUDED.employee_no,
+    external_source = EXCLUDED.external_source,
+    external_employee_id = EXCLUDED.external_employee_id,
     name = EXCLUDED.name,
     company_email = EXCLUDED.company_email,
     personal_email = EXCLUDED.personal_email,
@@ -278,8 +290,12 @@ ON CONFLICT (id) DO UPDATE SET
     contact_info = EXCLUDED.contact_info,
     insurance_info = EXCLUDED.insurance_info,
     internal_experiences = EXCLUDED.internal_experiences,
+    source_payload = EXCLUDED.source_payload,
+    source_updated_at = EXCLUDED.source_updated_at,
+    last_synced_at = EXCLUDED.last_synced_at,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
+WHERE employees.tenant_id = EXCLUDED.tenant_id
 RETURNING *;
 
 -- name: GetEmployee :one
@@ -385,6 +401,21 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
   )
   AND (NULLIF(sqlc.arg(present_to)::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF(sqlc.arg(present_to)::text, '')::timestamptz)
   AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz)
+  AND (
+    sqlc.arg(include_super_admins)::boolean
+    OR NOT EXISTS (
+      SELECT 1
+      FROM permission_sets
+      WHERE permission_sets.tenant_id = employees.tenant_id
+        AND permission_sets.id = ANY(coalesce(accounts.direct_permission_set_ids, '{}'::text[]))
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(permission_sets.permissions) AS permission
+          WHERE permission ->> 'resource' = '*'
+            AND permission ->> 'action' = '*'
+        )
+    )
+  )
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text <> 'attendance_asc' THEN CASE coalesce(nullif(employees.employment_status, ''), employees.status)
     WHEN 'active' THEN 0
@@ -456,7 +487,22 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
     OR employees.resign_date IS NOT NULL
   )
   AND (NULLIF(sqlc.arg(present_to)::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF(sqlc.arg(present_to)::text, '')::timestamptz)
-  AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz);
+  AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz)
+  AND (
+    sqlc.arg(include_super_admins)::boolean
+    OR NOT EXISTS (
+      SELECT 1
+      FROM permission_sets
+      WHERE permission_sets.tenant_id = employees.tenant_id
+        AND permission_sets.id = ANY(coalesce(accounts.direct_permission_set_ids, '{}'::text[]))
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(permission_sets.permissions) AS permission
+          WHERE permission ->> 'resource' = '*'
+            AND permission ->> 'action' = '*'
+        )
+    )
+  );
 
 -- name: ListEmployeesFilteredPage :many
 SELECT employees.* FROM employees
@@ -513,6 +559,21 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
   )
   AND (NULLIF(sqlc.arg(present_to)::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF(sqlc.arg(present_to)::text, '')::timestamptz)
   AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz)
+  AND (
+    sqlc.arg(include_super_admins)::boolean
+    OR NOT EXISTS (
+      SELECT 1
+      FROM permission_sets
+      WHERE permission_sets.tenant_id = employees.tenant_id
+        AND permission_sets.id = ANY(coalesce(accounts.direct_permission_set_ids, '{}'::text[]))
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(permission_sets.permissions) AS permission
+          WHERE permission ->> 'resource' = '*'
+            AND permission ->> 'action' = '*'
+        )
+    )
+  )
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text <> 'attendance_asc' THEN CASE coalesce(nullif(employees.employment_status, ''), employees.status)
     WHEN 'active' THEN 0
@@ -733,10 +794,12 @@ LIMIT 1;
 -- name: UpsertLeaveBalance :exec
 INSERT INTO leave_balances (
     id, tenant_id, employee_id, leave_type_id, entitlement_year,
-    granted_minutes, used_minutes, remaining_minutes, source, last_synced_at, updated_at
+    granted_minutes, used_minutes, remaining_minutes, source,
+    source_payload, source_updated_at, last_synced_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id), sqlc.arg(entitlement_year),
     sqlc.arg(granted_minutes), sqlc.arg(used_minutes), sqlc.arg(remaining_minutes), sqlc.arg(source),
+    sqlc.arg(source_payload)::jsonb, sqlc.narg(source_updated_at),
     sqlc.narg(last_synced_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (tenant_id, employee_id, leave_type_id, entitlement_year) DO UPDATE SET
@@ -744,6 +807,8 @@ ON CONFLICT (tenant_id, employee_id, leave_type_id, entitlement_year) DO UPDATE 
     granted_minutes = EXCLUDED.granted_minutes,
     used_minutes = EXCLUDED.used_minutes,
     source = EXCLUDED.source,
+    source_payload = EXCLUDED.source_payload,
+    source_updated_at = EXCLUDED.source_updated_at,
     last_synced_at = EXCLUDED.last_synced_at,
     updated_at = EXCLUDED.updated_at;
 
@@ -1158,13 +1223,16 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 -- name: UpsertLeaveRecord :one
 INSERT INTO leave_records (
     id, tenant_id, employee_id, leave_type_id, balance_id, entitlement_year,
-    source, event_date, start_at, end_at, net_minutes, remark, status,
-    matched_record_id, reconciliation_status, last_seen_at, deleted_at, updated_at
+    source, external_ref, event_date, start_at, end_at, net_minutes, remark, status,
+    matched_record_id, reconciliation_status, balance_match_status, balance_match_reason,
+    source_payload, source_updated_at, last_seen_at, deleted_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id),
-    sqlc.arg(balance_id), sqlc.arg(entitlement_year), sqlc.arg(source), sqlc.arg(event_date),
+    sqlc.narg(balance_id), sqlc.arg(entitlement_year), sqlc.arg(source), sqlc.arg(external_ref), sqlc.arg(event_date),
     sqlc.arg(start_at), sqlc.arg(end_at), sqlc.arg(net_minutes), sqlc.arg(remark), sqlc.arg(status),
     sqlc.narg(matched_record_id), sqlc.arg(reconciliation_status),
+    sqlc.arg(balance_match_status), sqlc.arg(balance_match_reason),
+    sqlc.arg(source_payload)::jsonb, sqlc.narg(source_updated_at),
     sqlc.narg(last_seen_at), sqlc.narg(deleted_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -1173,6 +1241,7 @@ ON CONFLICT (id) DO UPDATE SET
     balance_id = EXCLUDED.balance_id,
     entitlement_year = EXCLUDED.entitlement_year,
     source = EXCLUDED.source,
+    external_ref = EXCLUDED.external_ref,
     event_date = EXCLUDED.event_date,
     start_at = EXCLUDED.start_at,
     end_at = EXCLUDED.end_at,
@@ -1181,6 +1250,10 @@ ON CONFLICT (id) DO UPDATE SET
     status = EXCLUDED.status,
     matched_record_id = EXCLUDED.matched_record_id,
     reconciliation_status = EXCLUDED.reconciliation_status,
+    balance_match_status = EXCLUDED.balance_match_status,
+    balance_match_reason = EXCLUDED.balance_match_reason,
+    source_payload = EXCLUDED.source_payload,
+    source_updated_at = EXCLUDED.source_updated_at,
     last_seen_at = EXCLUDED.last_seen_at,
     deleted_at = EXCLUDED.deleted_at,
     updated_at = EXCLUDED.updated_at
@@ -1541,51 +1614,170 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
 ORDER BY clocked_at DESC, created_at DESC, id ASC;
 
--- name: UpsertAttendanceDailySummary :one
-INSERT INTO attendance_daily_summaries (
-    tenant_id, employee_id, work_date, shift_start, shift_end,
-    shift_hours, daily_hours, clock_hours, clock_start, clock_end,
-    payload, source, external_ref, created_at, updated_at
+-- name: UpsertAttendanceDailyRecord :one
+INSERT INTO attendance_daily_records (
+    tenant_id, employee_id, work_date, source,
+    scheduled_start_at, scheduled_end_at, scheduled_minutes, required_minutes,
+    worked_minutes, credited_leave_minutes, overtime_minutes,
+    clock_in_at, clock_out_at, clock_in_record_id, clock_out_record_id, punch_count,
+    day_status, anomaly_reasons, input_fingerprint, external_ref, payload,
+    created_at, updated_at
 ) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(work_date)::date,
-    sqlc.arg(shift_start), sqlc.arg(shift_end), sqlc.arg(shift_hours), sqlc.arg(daily_hours),
-    sqlc.arg(clock_hours), sqlc.arg(clock_start), sqlc.arg(clock_end),
-    sqlc.arg(payload)::jsonb, sqlc.arg(source), sqlc.arg(external_ref),
-    sqlc.arg(created_at), sqlc.arg(updated_at)
+    sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(work_date)::date, sqlc.arg(source),
+    sqlc.narg(scheduled_start_at), sqlc.narg(scheduled_end_at), sqlc.arg(scheduled_minutes),
+    sqlc.arg(required_minutes), sqlc.arg(worked_minutes), sqlc.arg(credited_leave_minutes),
+    sqlc.arg(overtime_minutes), sqlc.narg(clock_in_at), sqlc.narg(clock_out_at),
+    sqlc.narg(clock_in_record_id), sqlc.narg(clock_out_record_id), sqlc.arg(punch_count),
+    sqlc.arg(day_status), sqlc.arg(anomaly_reasons)::text[], sqlc.arg(input_fingerprint),
+    sqlc.arg(external_ref), sqlc.arg(payload)::jsonb, sqlc.arg(created_at), sqlc.arg(updated_at)
 )
-ON CONFLICT (tenant_id, employee_id, work_date) DO UPDATE SET
-    shift_start = EXCLUDED.shift_start,
-    shift_end = EXCLUDED.shift_end,
-    shift_hours = EXCLUDED.shift_hours,
-    daily_hours = EXCLUDED.daily_hours,
-    clock_hours = EXCLUDED.clock_hours,
-    clock_start = EXCLUDED.clock_start,
-    clock_end = EXCLUDED.clock_end,
-    payload = EXCLUDED.payload,
-    source = EXCLUDED.source,
+ON CONFLICT (tenant_id, employee_id, work_date, source) DO UPDATE SET
+    scheduled_start_at = EXCLUDED.scheduled_start_at,
+    scheduled_end_at = EXCLUDED.scheduled_end_at,
+    scheduled_minutes = EXCLUDED.scheduled_minutes,
+    required_minutes = EXCLUDED.required_minutes,
+    worked_minutes = EXCLUDED.worked_minutes,
+    credited_leave_minutes = EXCLUDED.credited_leave_minutes,
+    overtime_minutes = EXCLUDED.overtime_minutes,
+    clock_in_at = EXCLUDED.clock_in_at,
+    clock_out_at = EXCLUDED.clock_out_at,
+    clock_in_record_id = EXCLUDED.clock_in_record_id,
+    clock_out_record_id = EXCLUDED.clock_out_record_id,
+    punch_count = EXCLUDED.punch_count,
+    day_status = EXCLUDED.day_status,
+    anomaly_reasons = EXCLUDED.anomaly_reasons,
+    input_fingerprint = EXCLUDED.input_fingerprint,
     external_ref = EXCLUDED.external_ref,
+    payload = EXCLUDED.payload,
     updated_at = EXCLUDED.updated_at
 RETURNING *;
 
--- name: GetAttendanceDailySummaryByExternalRef :one
-SELECT * FROM attendance_daily_summaries
-WHERE tenant_id = $1 AND external_ref = $2 AND external_ref <> ''
-LIMIT 1;
-
--- name: GetAttendanceDailySummaryByEmployeeDate :one
-SELECT * FROM attendance_daily_summaries
-WHERE tenant_id = $1 AND employee_id = $2 AND work_date = sqlc.arg(work_date)::date
-LIMIT 1;
-
--- name: ListAttendanceDailySummaries :many
-SELECT * FROM attendance_daily_summaries
+-- name: GetAttendanceDailyRecord :one
+SELECT * FROM attendance_daily_records
 WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND employee_id = sqlc.arg(employee_id)
+  AND work_date = sqlc.arg(work_date)::date
+  AND source = sqlc.arg(source)
+LIMIT 1;
+
+-- name: GetAttendanceDailyRecordByExternalRef :one
+SELECT * FROM attendance_daily_records
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND source = 'ehrms'
+  AND external_ref = sqlc.arg(external_ref)
+  AND external_ref <> ''
+LIMIT 1;
+
+-- name: ListAttendanceDailyRecords :many
+SELECT * FROM attendance_daily_records
+WHERE tenant_id = sqlc.arg(tenant_id)
   AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
   AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR work_date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
   AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR work_date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
   AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
-ORDER BY work_date ASC, employee_id ASC;
+ORDER BY work_date ASC, employee_id ASC, source ASC;
+
+-- name: DeleteAttendanceDailyLeaveSegments :exec
+DELETE FROM attendance_daily_leave_segments
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND employee_id = sqlc.arg(employee_id)
+  AND work_date = sqlc.arg(work_date)::date;
+
+-- name: UpsertAttendanceDailyLeaveSegment :one
+INSERT INTO attendance_daily_leave_segments (
+    tenant_id, employee_id, work_date, daily_source, segment_no, leave_type_id,
+    source_leave_type, start_at, end_at, minutes, counted, time_inferred,
+    leave_record_id, link_status, match_basis, candidate_record_ids, payload,
+    created_at, updated_at
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(work_date)::date,
+    sqlc.arg(daily_source),
+    sqlc.arg(segment_no), sqlc.narg(leave_type_id), sqlc.arg(source_leave_type),
+    sqlc.narg(start_at), sqlc.narg(end_at), sqlc.arg(minutes), sqlc.arg(counted),
+    sqlc.arg(time_inferred), sqlc.narg(leave_record_id), sqlc.arg(link_status),
+    sqlc.arg(match_basis), sqlc.arg(candidate_record_ids)::text[],
+    sqlc.arg(payload)::jsonb, sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (tenant_id, employee_id, work_date, daily_source, segment_no) DO UPDATE SET
+    leave_type_id = EXCLUDED.leave_type_id,
+    source_leave_type = EXCLUDED.source_leave_type,
+    start_at = EXCLUDED.start_at,
+    end_at = EXCLUDED.end_at,
+    minutes = EXCLUDED.minutes,
+    counted = EXCLUDED.counted,
+    time_inferred = EXCLUDED.time_inferred,
+    leave_record_id = EXCLUDED.leave_record_id,
+    link_status = EXCLUDED.link_status,
+    match_basis = EXCLUDED.match_basis,
+    candidate_record_ids = EXCLUDED.candidate_record_ids,
+    payload = EXCLUDED.payload,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: ListAttendanceDailyLeaveSegments :many
+SELECT * FROM attendance_daily_leave_segments
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR work_date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
+  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR work_date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
+ORDER BY work_date ASC, employee_id ASC, segment_no ASC;
+
+-- name: UpsertAttendanceDailyReconciliation :one
+INSERT INTO attendance_daily_reconciliations (
+    tenant_id, employee_id, work_date, local_fingerprint, ehrms_fingerprint,
+    status, differences, resolution_status, resolved_by_account_id, resolved_at,
+    created_at, updated_at
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(work_date)::date,
+    sqlc.arg(local_fingerprint), sqlc.arg(ehrms_fingerprint), sqlc.arg(status),
+    sqlc.arg(differences)::jsonb, sqlc.arg(resolution_status),
+    sqlc.narg(resolved_by_account_id), sqlc.narg(resolved_at),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (tenant_id, employee_id, work_date) DO UPDATE SET
+    local_fingerprint = EXCLUDED.local_fingerprint,
+    ehrms_fingerprint = EXCLUDED.ehrms_fingerprint,
+    status = EXCLUDED.status,
+    differences = EXCLUDED.differences,
+    resolution_status = CASE
+        WHEN attendance_daily_reconciliations.local_fingerprint = EXCLUDED.local_fingerprint
+         AND attendance_daily_reconciliations.ehrms_fingerprint = EXCLUDED.ehrms_fingerprint
+        THEN attendance_daily_reconciliations.resolution_status
+        ELSE 'unresolved'
+    END,
+    resolved_by_account_id = CASE
+        WHEN attendance_daily_reconciliations.local_fingerprint = EXCLUDED.local_fingerprint
+         AND attendance_daily_reconciliations.ehrms_fingerprint = EXCLUDED.ehrms_fingerprint
+        THEN attendance_daily_reconciliations.resolved_by_account_id
+        ELSE NULL
+    END,
+    resolved_at = CASE
+        WHEN attendance_daily_reconciliations.local_fingerprint = EXCLUDED.local_fingerprint
+         AND attendance_daily_reconciliations.ehrms_fingerprint = EXCLUDED.ehrms_fingerprint
+        THEN attendance_daily_reconciliations.resolved_at
+        ELSE NULL
+    END,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendanceDailyReconciliation :one
+SELECT * FROM attendance_daily_reconciliations
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND employee_id = sqlc.arg(employee_id)
+  AND work_date = sqlc.arg(work_date)::date
+LIMIT 1;
+
+-- name: ListEHRMSLeaveRecordCandidates :many
+SELECT * FROM leave_records
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND employee_id = sqlc.arg(employee_id)
+  AND source = 'ehrms'
+  AND status = 'active'
+  AND deleted_at IS NULL
+  AND leave_type_id = sqlc.arg(leave_type_id)
+  AND start_at < sqlc.arg(to_at)::timestamptz
+  AND end_at > sqlc.arg(from_at)::timestamptz
+ORDER BY start_at ASC, end_at ASC, id ASC;
 
 -- name: UpsertAttendanceDayProjection :one
 INSERT INTO attendance_day_projections (

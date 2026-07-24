@@ -76,6 +76,66 @@ JOIN target_segment
   ON target_segment.tenant_id = conversations.tenant_id
  AND target_segment.conversation_id = conversations.id;
 
+-- name: UpsertAgentChatExecution :execrows
+INSERT INTO conversation_executions (
+    id, tenant_id, account_id, conversation_id, segment_id, input_message_id,
+    agent_id, agent_revision_id, model_connection_id,
+    mode, trigger_type, status, queued_at, started_at, completed_at,
+    error_code, error_category, safe_error_message,
+    llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens,
+    usage_complete, created_at, updated_at
+)
+SELECT
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(account_id),
+    messages.conversation_id, messages.segment_id, messages.id,
+    NULLIF(sqlc.arg(agent_id)::text, ''),
+    NULLIF(sqlc.arg(agent_revision_id)::text, ''),
+    NULLIF(sqlc.arg(model_connection_id)::text, ''),
+    sqlc.arg(mode), 'chat', sqlc.arg(status), sqlc.arg(created_at),
+    CASE
+        WHEN sqlc.arg(status)::text = 'queued' THEN NULL
+        ELSE sqlc.arg(updated_at)::timestamptz
+    END,
+    CASE
+        WHEN sqlc.arg(status)::text IN ('completed', 'failed', 'cancelled')
+            THEN sqlc.arg(updated_at)::timestamptz
+        ELSE NULL
+    END,
+    sqlc.arg(error_code), sqlc.arg(error_category),
+    CASE WHEN sqlc.arg(status)::text = 'failed' THEN sqlc.arg(safe_error_message)::text ELSE '' END,
+    sqlc.arg(llm_call_count), sqlc.arg(input_tokens), sqlc.arg(cached_tokens),
+    sqlc.arg(output_tokens), sqlc.arg(total_tokens), sqlc.arg(usage_complete),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
+FROM conversation_messages messages
+JOIN conversations
+  ON conversations.tenant_id = messages.tenant_id
+ AND conversations.id = messages.conversation_id
+ AND conversations.current_segment_id = messages.segment_id
+WHERE messages.tenant_id = sqlc.arg(tenant_id)
+  AND messages.id = sqlc.arg(input_message_id)
+  AND messages.conversation_id = sqlc.arg(session_id)
+  AND messages.segment_id = sqlc.arg(segment_id)
+  AND messages.role = 'user'
+  AND conversations.owner_account_id = sqlc.arg(account_id)
+ON CONFLICT (id) DO UPDATE SET
+    status = EXCLUDED.status,
+    started_at = CASE
+        WHEN EXCLUDED.status = 'queued' THEN conversation_executions.started_at
+        ELSE COALESCE(conversation_executions.started_at, EXCLUDED.started_at)
+    END,
+    completed_at = EXCLUDED.completed_at,
+    error_code = EXCLUDED.error_code,
+    error_category = EXCLUDED.error_category,
+    safe_error_message = EXCLUDED.safe_error_message,
+    llm_call_count = EXCLUDED.llm_call_count,
+    input_tokens = EXCLUDED.input_tokens,
+    cached_tokens = EXCLUDED.cached_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    total_tokens = EXCLUDED.total_tokens,
+    usage_complete = EXCLUDED.usage_complete,
+    updated_at = EXCLUDED.updated_at
+WHERE conversation_executions.tenant_id = EXCLUDED.tenant_id;
+
 -- name: GetAgentSession :one
 SELECT
     conversations.id,

@@ -185,7 +185,7 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 		}
 	case ScopeDirectReports:
 		if _, ok := out["employee_ids"]; !ok && account.EmployeeID != "" {
-			employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+			employees, err := c.listBusinessEmployees(ctx)
 			if err != nil {
 				return nil, err
 			}

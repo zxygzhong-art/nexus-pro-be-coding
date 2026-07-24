@@ -88,23 +88,32 @@ func TestNormalizeDepartmentAndPositionRecords(t *testing.T) {
 func TestNormalizeLeaveRecords(t *testing.T) {
 	t.Parallel()
 	balances := ehrms.NormalizeLeaveBalanceRecords([]domain.EHRMSLeaveBalanceRecord{{
-		"emp_id":      "IKM017",
-		"leave_type":  "annual",
-		"remaining":   "8",
-		"expire_date": "2026-12-31",
+		"emp_id":              "IKM017",
+		"year":                "2026",
+		"leave_code":          "I001-1",
+		"leave_category_code": "I001",
+		"name_zh":             "Full Pay Sick Leave",
+		"remaining":           "40",
+		"quota":               "40",
+		"used":                "0",
+		"unit":                "hours",
 	}})
-	if balances[0]["員工編號"] != "IKM017" || balances[0]["假別"] != "annual" || balances[0]["餘額"] != "8" || balances[0]["到期日"] != "2026-12-31" {
+	if balances[0]["員工編號"] != "IKM017" || balances[0]["假別"] != "Full Pay Sick Leave" ||
+		balances[0]["假別代碼"] != "I001-1" || balances[0]["餘額"] != "40" {
 		t.Fatalf("unexpected leave balance normalize: %+v", balances[0])
 	}
 	details := ehrms.NormalizeLeaveDetailRecords([]domain.EHRMSLeaveDetailRecord{{
-		"emp_id":     "IKM017",
-		"date":       "2026-06-11",
-		"leave_type": "annual",
-		"start":      "09:00",
-		"end":        "13:00",
-		"hours":      "4",
+		"emp_id":              "IKM017",
+		"date":                "2026-01-30",
+		"leave_type":          "外勤",
+		"leave_code":          "S0013-1",
+		"leave_category_code": "S0013",
+		"start":               "2026-01-30 09:00:00",
+		"end":                 "2026-01-30 17:00:00",
+		"hours":               "7",
 	}})
-	if details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-06-11" || details[0]["開始時間"] != "09:00" || details[0]["時數"] != "4" {
+	if details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-01-30" ||
+		details[0]["開始時間"] != "2026-01-30 09:00:00" || details[0]["時數"] != "7" {
 		t.Fatalf("unexpected leave detail normalize: %+v", details[0])
 	}
 }

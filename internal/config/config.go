@@ -97,13 +97,11 @@ type Config struct {
 	ObjectStoreUseSSL                  bool
 	ObjectStoreCreateBucket            bool
 
-	EHRMSBaseURL         string
-	EHRMSAPIKey          string
-	EHRMSRequestInterval time.Duration
-	EHRMSSyncEnabled     bool
-	EHRMSSyncMode        string
-	EHRMSSyncTenantID    string
-	EHRMSSyncAccountID   string
+	EHRMSBaseURL       string
+	EHRMSAPIKey        string
+	EHRMSSyncEnabled   bool
+	EHRMSSyncTenantID  string
+	EHRMSSyncAccountID string
 
 	OTelEnabled              bool
 	OTelServiceName          string
@@ -319,13 +317,11 @@ func LoadE() (Config, error) {
 		ObjectStoreUseSSL:                  envBool("OBJECT_STORE_USE_SSL", false, &problems),
 		ObjectStoreCreateBucket:            envBool("OBJECT_STORE_CREATE_BUCKET", false, &problems),
 
-		EHRMSBaseURL:         strings.TrimSpace(os.Getenv("EHRMS_BASE_URL")),
-		EHRMSAPIKey:          os.Getenv("EHRMS_API_KEY"),
-		EHRMSRequestInterval: envDuration("EHRMS_REQUEST_INTERVAL", time.Second, &problems),
-		EHRMSSyncEnabled:     ehrmsSyncEnabled,
-		EHRMSSyncMode:        env("EHRMS_SYNC_MODE", "upsert"),
-		EHRMSSyncTenantID:    strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")),
-		EHRMSSyncAccountID:   strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")),
+		EHRMSBaseURL:       strings.TrimSpace(os.Getenv("EHRMS_BASE_URL")),
+		EHRMSAPIKey:        os.Getenv("EHRMS_API_KEY"),
+		EHRMSSyncEnabled:   ehrmsSyncEnabled,
+		EHRMSSyncTenantID:  strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")),
+		EHRMSSyncAccountID: strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")),
 
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
 		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-api"),
@@ -409,11 +405,6 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	}
 	if strings.TrimSpace(c.EHRMSSyncAccountID) == "" {
 		problems = append(problems, "EHRMS_SYNC_ACCOUNT_ID is required when EHRMS_SYNC_ENABLED=true")
-	}
-	switch strings.ToLower(strings.TrimSpace(c.EHRMSSyncMode)) {
-	case "", "create", "update", "upsert":
-	default:
-		problems = append(problems, "EHRMS_SYNC_MODE must be create, update, or upsert")
 	}
 	return problems
 }

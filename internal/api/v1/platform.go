@@ -20,7 +20,6 @@ type PlatformCtrl struct {
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c PlatformCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	platform := router.Group("/platform")
-	platform.GET("/home", c.routes.Handle("me", "read", c.home))
 	platform.GET("/assistants", c.routes.Handle("me", "read", c.assistants))
 	platform.GET("/forms", c.routes.Handle("me", "read", c.forms))
 	platform.GET("/tasks", c.routes.Handle("me", "read", c.tasks))
@@ -31,16 +30,6 @@ func (c PlatformCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	platform.PATCH("/tasks/todos/:id", c.routes.Handle("me", "update", c.updateTaskTodo, ResourceID(PathParamID)))
 	platform.DELETE("/tasks/todos/:id", c.routes.Handle("me", "delete", c.deleteTaskTodo, ResourceID(PathParamID)))
 	platform.POST("/tasks/todos/:id/convert", c.routes.Handle("me", "update", c.convertTaskTodo, ResourceID(PathParamID)))
-}
-
-// home 處理首頁的 HTTP 請求。
-func (c PlatformCtrl) home(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.Home(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
 }
 
 // assistants 處理助理的 HTTP 請求。

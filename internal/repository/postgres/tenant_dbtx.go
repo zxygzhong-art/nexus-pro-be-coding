@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -194,6 +195,12 @@ type tenantRow struct {
 // Scan 處理 scan。
 func (r tenantRow) Scan(dest ...any) error {
 	if err := r.row.Scan(dest...); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			if commitErr := r.tx.Commit(r.ctx); commitErr != nil {
+				return commitErr
+			}
+			return err
+		}
 		_ = r.tx.Rollback(r.ctx)
 		return err
 	}

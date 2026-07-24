@@ -32,6 +32,46 @@ func (q *Queries) ArchiveAgentExternalToolCapabilitiesV2(ctx context.Context, ar
 	return err
 }
 
+const claimAgentDefinitionRevision = `-- name: ClaimAgentDefinitionRevision :one
+UPDATE agents
+SET next_revision_no = next_revision_no
+    + CASE WHEN $1::boolean THEN 1 ELSE 0 END
+WHERE agents.tenant_id = $2
+  AND agents.id = $3
+  AND agents.parent_agent_id IS NULL
+  AND agents.lifecycle_status = 'active'
+  AND EXISTS (
+      SELECT 1
+      FROM agent_revisions current_revision
+      WHERE current_revision.tenant_id = agents.tenant_id
+        AND current_revision.id = agents.draft_revision_id
+        AND current_revision.revision_no = $4
+  )
+RETURNING (
+    next_revision_no
+    - CASE WHEN $1::boolean THEN 1 ELSE 0 END
+)::integer AS revision_no
+`
+
+type ClaimAgentDefinitionRevisionParams struct {
+	CreateRevision  bool   `json:"create_revision"`
+	TenantID        string `json:"tenant_id"`
+	ID              string `json:"id"`
+	ExpectedVersion int32  `json:"expected_version"`
+}
+
+func (q *Queries) ClaimAgentDefinitionRevision(ctx context.Context, arg ClaimAgentDefinitionRevisionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, claimAgentDefinitionRevision,
+		arg.CreateRevision,
+		arg.TenantID,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var revision_no int32
+	err := row.Scan(&revision_no)
+	return revision_no, err
+}
+
 const countAgentDefinitionsByKnowledgeBase = `-- name: CountAgentDefinitionsByKnowledgeBase :one
 SELECT count(DISTINCT COALESCE(agent.parent_agent_id, agent.id))::bigint
 FROM agent_revision_knowledge_bases binding

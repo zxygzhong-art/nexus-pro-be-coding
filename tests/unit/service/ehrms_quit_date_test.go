@@ -73,6 +73,7 @@ func TestSyncEHRMSEmployeesUsesSeniorityStartForPendingHire(t *testing.T) {
 		"dept_name_zh":    "Nexus",
 		"job_code":        "0704",
 		"job_title_zh":    "工程師",
+		"updated_at":      "2026-07-31 18:30:00",
 	}}
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "import", Scope: "all"},
@@ -91,8 +92,16 @@ func TestSyncEHRMSEmployeesUsesSeniorityStartForPendingHire(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected pending employee, ok=%v err=%v", ok, err)
 	}
-	if employee.ID != "IKM100" {
-		t.Fatalf("expected employees.id to equal emp_id, got %q", employee.ID)
+	if employee.ID == "IKM100" || employee.ID == "" {
+		t.Fatalf("expected tenant-scoped internal employee ID instead of raw emp_id, got %q", employee.ID)
+	}
+	if employee.ExternalSource != "ehrms" || employee.ExternalEmployeeID != "IKM100" ||
+		employee.LastSyncedAt == nil || employee.SourceUpdatedAt == nil {
+		t.Fatalf("expected EHRMS identity and sync metadata, got %+v", employee)
+	}
+	if employee.SourcePayload["updated_at"] != "2026-07-31 18:30:00" ||
+		employee.SourcePayload["seniority_start"] != "2026/08/01" {
+		t.Fatalf("expected complete upstream source payload, got %+v", employee.SourcePayload)
 	}
 	wantHireDate := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	if employee.EmploymentStatus != "onboarding" || employee.HireDate == nil || !employee.HireDate.Equal(wantHireDate) {
